@@ -1,0 +1,210 @@
+//! The terminal: raw mode, a restore that survives a panic, key decoding and
+//! one atomic present.
+//!
+//! Everything is written to **stderr**. stdout belongs to whatever command we
+//! are wrapping — a shell pipeline downstream of `adhd -- cmd` must receive the
+//! command's bytes and nothing of ours.
+
+use std::io::{self, Write};
+use std::time::Duration;
+
+use anyhow::Result;
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyModifiers},
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
+};
+
+use crate::world::{enc_diff, Cell};
+
+/// Used when the terminal will not say how big it is (a pipe, a CI log).
+pub const FALLBACK_SIZE: (usize, usize) = (120, 34);
+
+/// Below this the world has nowhere to put a well, so there is nothing to play.
+pub const MIN_SIZE: (usize, usize) = (40, 14);
+
+/// Ask the terminal for its size, falling back to something playable.
+pub fn size() -> (usize, usize) {
+    match terminal::size() {
+        Ok((c, r)) if c as usize >= MIN_SIZE.0 && r as usize >= MIN_SIZE.1 => {
+            (c as usize, r as usize)
+        }
+        _ => FALLBACK_SIZE,
+    }
+}
+
+/// Restores raw mode, the alternate screen and the cursor on drop, so an early
+/// return or a `?` never leaves the shell wedged. A panic hook does the same for
+/// the unwind path, which `Drop` alone does not cover when the panic aborts.
+pub struct Guard;
+
+impl Guard {
+    pub fn enter() -> Result<Self> {
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore();
+            default(info);
+        }));
+        terminal::enable_raw_mode()?;
+        let mut err = io::stderr();
+        err.execute(EnterAlternateScreen)?;
+        err.execute(cursor::Hide)?;
+        Ok(Guard)
+    }
+}
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        restore();
+    }
+}
+
+fn restore() {
+    let mut err = io::stderr();
+    let _ = err.execute(cursor::Show);
+    let _ = err.execute(LeaveAlternateScreen);
+    let _ = terminal::disable_raw_mode();
+}
+
+/// Ships frames to the terminal, reusing its buffers so a frame allocates
+/// nothing.
+///
+/// The diff has to be encoded into a buffer of its own: every encoder in
+/// [`crate::world::encode`] clears its output first, so writing the DEC 2026
+/// introducer into that same buffer would silently drop it and every frame
+/// would tear.
+#[derive(Default)]
+pub struct Presenter {
+    body: Vec<u8>,
+    out: Vec<u8>,
+}
+
+/// Colour-match tolerance and the run-joining gap, matched to the stage's own
+/// resolve tolerance.
+const TOL: i32 = 2;
+const GAP: usize = 6;
+
+impl Presenter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// One atomic present: DEC 2026 brackets the whole diff so a burst lands as
+    /// a single update instead of tearing across the scanout.
+    pub fn frame(&mut self, cells: &[Cell], prev: &[Cell], w: usize, h: usize) -> Result<()> {
+        enc_diff(cells, prev, w, h, TOL, GAP, &mut self.body);
+        self.out.clear();
+        self.out.extend_from_slice(b"\x1b[?2026h");
+        self.out.extend_from_slice(&self.body);
+        self.out.extend_from_slice(b"\x1b[?2026l");
+        let mut err = io::stderr();
+        err.write_all(&self.out)?;
+        err.flush()?;
+        Ok(())
+    }
+}
+
+pub fn clear() -> Result<()> {
+    io::stderr().execute(terminal::Clear(terminal::ClearType::All))?;
+    Ok(())
+}
+
+/// Swallow anything typed during a run, so keys meant for the game do not land
+/// on the shell prompt after we hand the terminal back.
+pub fn drain() {
+    while event::poll(Duration::ZERO).unwrap_or(false) {
+        let _ = event::read();
+    }
+}
+
+/// What one frame's worth of keys means. Held keys (`left`/`right`/`soft`) are
+/// true while the key repeats; the rest are edges. A cooked terminal cannot be
+/// trusted to report releases, so the caller rebuilds this fresh every frame.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Keys {
+    pub left: bool,
+    pub right: bool,
+    pub down: bool,
+    pub up: bool,
+    pub cw: bool,
+    pub ccw: bool,
+    pub hard: bool,
+    pub hold: bool,
+    pub enter: bool,
+    pub back: bool,
+    /// Esc, q or Ctrl-C — leave whatever we are in.
+    pub quit: bool,
+}
+
+impl Keys {
+    fn press(&mut self, code: KeyCode, mods: KeyModifiers) {
+        let ctrl = mods.contains(KeyModifiers::CONTROL);
+        match code {
+            KeyCode::Left => self.left = true,
+            KeyCode::Right => self.right = true,
+            KeyCode::Down => {
+                self.down = true;
+                self.cw = false;
+            }
+            KeyCode::Up => {
+                self.up = true;
+                self.cw = true;
+            }
+            KeyCode::Char('h') | KeyCode::Char('H') if !ctrl => self.left = true,
+            KeyCode::Char('l') | KeyCode::Char('L') if !ctrl => self.right = true,
+            KeyCode::Char('j') | KeyCode::Char('J') if !ctrl => self.down = true,
+            KeyCode::Char('k') | KeyCode::Char('K') if !ctrl => {
+                self.up = true;
+                self.cw = true;
+            }
+            KeyCode::Char('x') | KeyCode::Char('X') => self.cw = true,
+            KeyCode::Char('z') | KeyCode::Char('Z') => self.ccw = true,
+            KeyCode::Char(' ') => self.hard = true,
+            KeyCode::Char('c') | KeyCode::Char('C') if ctrl => self.quit = true,
+            KeyCode::Char('c') | KeyCode::Char('C') => self.hold = true,
+            KeyCode::Enter => self.enter = true,
+            KeyCode::Backspace | KeyCode::Tab => self.back = true,
+            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => self.quit = true,
+            // Readline arrows, for terminals that send them instead.
+            KeyCode::Char('b') | KeyCode::Char('B') if ctrl => self.left = true,
+            KeyCode::Char('f') | KeyCode::Char('F') if ctrl => self.right = true,
+            KeyCode::Char('n') | KeyCode::Char('N') if ctrl => self.down = true,
+            KeyCode::Char('p') | KeyCode::Char('P') if ctrl => self.cw = true,
+            _ => {}
+        }
+    }
+
+    pub fn any(&self) -> bool {
+        self.left
+            || self.right
+            || self.down
+            || self.up
+            || self.cw
+            || self.ccw
+            || self.hard
+            || self.hold
+            || self.enter
+            || self.back
+    }
+}
+
+/// Everything the terminal reported since the last frame.
+#[derive(Default)]
+pub struct Poll {
+    pub keys: Keys,
+    pub resize: Option<(usize, usize)>,
+}
+
+/// Non-blocking: fold every pending event into one [`Poll`].
+pub fn poll() -> Result<Poll> {
+    let mut p = Poll::default();
+    while event::poll(Duration::ZERO)? {
+        match event::read()? {
+            Event::Key(k) => p.keys.press(k.code, k.modifiers),
+            Event::Resize(c, r) => p.resize = Some((c as usize, r as usize)),
+            _ => {}
+        }
+    }
+    Ok(p)
+}

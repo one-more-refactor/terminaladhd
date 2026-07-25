@@ -1,0 +1,20 @@
+[package]
+name = "terminaladhd"
+version = "0.1.0"
+edition = "2021"
+description = "Play an arcade in your terminal while a long command runs"
+license = "MIT"
+keywords = ["terminal", "game", "tui", "ansi", "arcade"]
+categories = ["command-line-utilities", "game-development"]
+
+[[bin]]
+name = "adhd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+crossterm = "0.29"
+
+[profile.release]
+strip = true
+lto = true
