@@ -166,11 +166,13 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Snake) {
         &[
             Stat {
                 label: "APPLES",
+                short: "AP",
                 value: g.eaten(),
                 hue: c(GREEN),
             },
             Stat {
                 label: "MULT",
+                short: "MU",
                 value: g.mult(),
                 hue: c(MAGENTA),
             },
@@ -181,13 +183,13 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Snake) {
     if left <= 0.0 {
         return;
     }
-    let w = (l.side as i32 - 4).clamp(8, 26);
+    let w = crate::world::cabinet::col_w(l);
     let lit_to = (w as f32 * left).round() as i32;
     for i in 0..w {
         let col = if i < lit_to { c(YELLOW) } else { c(IRON) };
-        put_base(b, x + i, end - 2, col);
+        put_base(b, x + i, end + 1, col);
         if i < lit_to {
-            add_emis(b, x + i, end - 2, col.mul(0.8));
+            add_emis(b, x + i, end + 1, col.mul(0.8));
         }
     }
 }

@@ -150,8 +150,8 @@ pub fn bloom(b: &mut Buf, rx: usize, ry: usize, gain: f32, out: &mut Vec<Rgb>) {
 
     out.clear();
     out.reserve(w * sh);
-    for i in 0..w * sh {
-        out.push(b.base[i].add(b.emis[i]).add(cur[i].mul(gain)));
+    for ((base, emis), blurred) in b.base.iter().zip(&b.emis).zip(&cur) {
+        out.push(base.add(*emis).add(blurred.mul(gain)));
     }
 }
 
@@ -204,9 +204,9 @@ pub fn chrome_word(b: &mut Buf, text: &str, scale: usize, cx_px: f32, cy_sub: f3
 
     for (ci, ch) in text.chars().enumerate() {
         let g = font::glyph(ch);
-        for gy in 0..font::H {
+        for (gy, row) in g.iter().enumerate().take(font::H) {
             for gx in 0..font::W {
-                if g[gy] & (1 << (font::W - 1 - gx)) == 0 {
+                if row & (1 << (font::W - 1 - gx)) == 0 {
                     continue;
                 }
                 for sy in 0..scale {

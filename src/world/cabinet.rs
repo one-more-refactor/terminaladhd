@@ -10,7 +10,7 @@
 //! the code with it.
 
 use super::draw::{add_emis, lit, put_base, text, text_center, text_w};
-use super::layout::Layout;
+use super::layout::{Layout, FOLDED_SUB, HEAD_SUB, READOUT_SUB};
 use super::scene::palette::*;
 use super::scene::Buf;
 use crate::world::color::{hex, Rgb};
@@ -203,18 +203,23 @@ pub fn ticker(b: &mut Buf, l: &Layout, left: &str, right: &str) {
 /// two of air under it.
 pub const HEAD_ROWS: i32 = 9;
 
-/// Columns a side column occupies. Wide enough for a six-figure reading and a
-/// four-mino preview, narrow enough to fit the flank at the smallest size that
-/// has one.
-fn col_w(l: &Layout) -> i32 {
-    (l.side as i32 - 4).clamp(8, 26)
+/// Columns a side column occupies: what is left of the flank once it has been
+/// hung off the arena, and never wider than the frame it has to end inside.
+pub fn col_w(l: &Layout) -> i32 {
+    let start = l.right_col.map(|(x, _)| x).unwrap_or(0) as i32;
+    (l.w as i32 - start - 1).clamp(4, 26)
 }
 
 /// A heading: the label, then a hairline the width of the column. Returns the
 /// sub-row its content starts at, so a caller never counts rows itself.
-pub fn heading(b: &mut Buf, l: &Layout, x: i32, y: i32, label: &str) -> i32 {
-    text(b, label, x, y, 1, c(STEEL), 0.0);
+///
+/// `label` is the long form and `short` the one used when the column cannot
+/// hold it. A clipped word is worse than an abbreviated one — `APPLE` reads as
+/// a different reading, `AP` reads as the same one, smaller.
+pub fn heading(b: &mut Buf, l: &Layout, x: i32, y: i32, label: &str, short: &str) -> i32 {
     let w = col_w(l);
+    let label = if text_w(label, 1) <= w { label } else { short };
+    text(b, label, x, y, 1, c(STEEL), 0.0);
     for i in 0..w {
         // Brightest under the label and fading out along its length: a rule
         // that stops dead reads as a border, one that fades reads as an
@@ -228,6 +233,8 @@ pub fn heading(b: &mut Buf, l: &Layout, x: i32, y: i32, label: &str) -> i32 {
 /// One reading under a heading of its own.
 pub struct Stat {
     pub label: &'static str,
+    /// What the label becomes when the column is too narrow for it.
+    pub short: &'static str,
     pub value: u32,
     pub hue: Rgb,
 }
@@ -237,9 +244,16 @@ pub struct Stat {
 pub fn readouts(b: &mut Buf, l: &Layout, x: i32, y: i32, stats: &[Stat]) -> i32 {
     let mut y = y;
     for s in stats {
-        let inner = heading(b, l, x, y, s.label);
+        if l.compact_readouts {
+            // Label and value on one line, in the reading's own colour: a short
+            // column would rather lose the heading than lose the queue above it.
+            text(b, &format!("{} {}", s.short, s.value), x, y, 1, s.hue, 0.45);
+            y += FOLDED_SUB as i32;
+            continue;
+        }
+        let inner = heading(b, l, x, y, s.label, s.short);
         text(b, &s.value.to_string(), x, inner, 1, s.hue, 0.45);
-        y = inner + 8;
+        y = inner + (READOUT_SUB - HEAD_SUB) as i32;
     }
     y
 }
@@ -273,15 +287,20 @@ pub fn burst(b: &mut Buf, cx: f32, cy: f32, reach: f32, age: f32, col: Rgb) {
     // Sixteen spokes rather than a ring: a ring reads as a shockwave from a
     // modern engine, spokes read as a sprite explosion from a cabinet.
     const SPOKES: usize = 16;
+    // Half a turn at 22.5-degree steps; the other half is these negated, which
+    // is why only eight are listed for sixteen spokes.
+    const OCT: f32 = std::f32::consts::FRAC_1_SQRT_2;
+    const SIN22: f32 = 0.382_683_43;
+    const COS22: f32 = 0.923_879_5;
     const DIRS: [(f32, f32); 8] = [
         (1.0, 0.0),
-        (0.9239, 0.3827),
-        (0.7071, 0.7071),
-        (0.3827, 0.9239),
+        (COS22, SIN22),
+        (OCT, OCT),
+        (SIN22, COS22),
         (0.0, 1.0),
-        (-0.3827, 0.9239),
-        (-0.7071, 0.7071),
-        (-0.9239, 0.3827),
+        (-SIN22, COS22),
+        (-OCT, OCT),
+        (-COS22, SIN22),
     ];
     for i in 0..SPOKES {
         let (dx, dy) = DIRS[i % 8];

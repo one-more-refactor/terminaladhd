@@ -258,6 +258,101 @@ impl Stage {
         self.close(s.shown, best, self.kind.name(), blink, tick);
     }
 
+    /// The clock stopped. The game stays on screen behind a half-collapsed
+    /// raster — the picture is visibly held rather than replaced, so it is
+    /// obvious nothing has been lost.
+    pub fn paused(&mut self, g: &dyn Game, best: u32, blink: bool, tick: &Tick) {
+        self.open(0.0);
+        g.paint(&mut self.buf, &self.layout);
+        self.dim_all(0.35);
+        let cx = self.layout.w as i32 / 2;
+        let mid = self.layout.h as f32;
+        let scale = hero_scale("PAUSED", self.layout.w, 3);
+        chrome_word(&mut self.buf, "PAUSED", scale, self.layout.w as f32 * 0.5, mid);
+        if blink {
+            text_center(
+                &mut self.buf,
+                "P TO RESUME",
+                cx,
+                mid as i32 + 5 * scale as i32 + 4,
+                1,
+                c(STEEL),
+                0.0,
+            );
+        }
+        self.close(g.score(), best, self.kind.name(), blink, tick);
+    }
+
+    /// The controls, on their own screen. Every machine had this printed on the
+    /// bezel; this one has nowhere to print it.
+    pub fn help(&mut self, kind: Kind, best: u32, tick: &Tick) {
+        self.open(0.1);
+        let cx = self.layout.w as i32 / 2;
+        let scale = hero_scale("CONTROLS", self.layout.w, 2);
+        let th = 7 * scale as i32;
+        // Hung off the rule, or the title's top band is drawn through the
+        // status strip — the same rule the board follows.
+        let title_cy = self.layout.rule_sub as i32 + 3 + th / 2;
+        chrome_word(
+            &mut self.buf,
+            "CONTROLS",
+            scale,
+            self.layout.w as f32 * 0.5,
+            title_cy as f32,
+        );
+
+        let rows: [(&str, &str); 7] = [
+            ("ARROWS  HJKL", "MOVE AND STEER"),
+            ("X  UP", "ROTATE"),
+            ("Z", "ROTATE BACK"),
+            ("SPACE", "HARD DROP"),
+            ("C", "HOLD"),
+            ("P", "PAUSE"),
+            ("ESC", "LEAVE, AGAIN TO QUIT"),
+        ];
+        // Two columns on one gutter: keys right-aligned into the middle,
+        // meanings left-aligned out of it, which is how every manual of the
+        // period set a control table.
+        let gutter = cx + 2;
+        let mut y = title_cy + th / 2 + 5;
+        for (key, what) in rows {
+            text(&mut self.buf, key, gutter - 4 - text_w(key, 1), y, 1, c(YELLOW), 0.3);
+            text(&mut self.buf, what, gutter + 4, y, 1, c(STEEL), 0.0);
+            y += 8;
+        }
+        text_center(
+            &mut self.buf,
+            kind.hint(),
+            cx,
+            y + 6,
+            1,
+            c(CYAN),
+            0.4,
+        );
+        self.close(0, best, kind.name(), true, tick);
+    }
+
+    /// The frame is smaller than the machine can draw. Says so, in the only
+    /// thing that still fits.
+    pub fn too_small(&mut self) {
+        ground(&mut self.buf);
+        let cx = self.layout.w as i32 / 2;
+        let mid = self.layout.h as i32;
+        text_center(&mut self.buf, "SCREEN TOO SMALL", cx, mid - 6, 1, c(YELLOW), 0.6);
+        text_center(
+            &mut self.buf,
+            &format!("NEEDS {}x{}", crate::term::MIN_SIZE.0, crate::term::MIN_SIZE.1),
+            cx,
+            mid + 2,
+            1,
+            c(STEEL),
+            0.0,
+        );
+        bloom(&mut self.buf, BLOOM.0, BLOOM.1, BLOOM.2, &mut self.px);
+        scanlines(&mut self.px, self.buf.w, self.buf.sh, SCANLINE);
+        self.resolve();
+    }
+
     /// The board for one game, best first, with the run that just landed lit.
     pub fn board(
         &mut self,

@@ -155,8 +155,8 @@ pub fn enc_stateful(cells: &[Cell], w: usize, h: usize, tol: i32, o: &mut Vec<u8
             let c = cells[y * w + x];
             // A space shows only its background, so the foreground register can
             // be left stale -- skipping it costs nothing visually.
-            let need_fg = c.half && cur_fg.map_or(true, |p| !near(p, c.fg, tol));
-            let need_bg = cur_bg.map_or(true, |p| !near(p, c.bg, tol));
+            let need_fg = c.half && !cur_fg.is_some_and(|p| near(p, c.fg, tol));
+            let need_bg = !cur_bg.is_some_and(|p| near(p, c.bg, tol));
             match (need_fg, need_bg) {
                 (true, true) => {
                     sgr_both(o, c.fg, c.bg);
@@ -234,8 +234,8 @@ pub fn enc_diff(
             // position-independent -- no need to reset them
             for k in start..=end {
                 let c = cells[row + k];
-                let need_fg = c.half && cur_fg.map_or(true, |p| !near(p, c.fg, tol));
-                let need_bg = cur_bg.map_or(true, |p| !near(p, c.bg, tol));
+                let need_fg = c.half && !cur_fg.is_some_and(|p| near(p, c.fg, tol));
+                let need_bg = !cur_bg.is_some_and(|p| near(p, c.bg, tol));
                 match (need_fg, need_bg) {
                     (true, true) => {
                         sgr_both(o, c.fg, c.bg);

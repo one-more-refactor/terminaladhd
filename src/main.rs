@@ -126,6 +126,12 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     stage.curtain = 0.0;
 
     // The loudest frame the machine has: hold lost, guns apart, chassis moved.
+    stage.help(Kind::Tetris, 9200, &tick);
+    dump(&stage, "help")?;
+
+    stage.paused(mid.as_ref(), 9200, true, &tick);
+    dump(&stage, "paused")?;
+
     stage.tear = 9.0;
     stage.fringe = 6.0;
     stage.jolt = (2, 2);
@@ -216,11 +222,30 @@ fn run() -> Result<i32> {
     }
 
     let Some(argv) = args.command else {
+        if !term::attached() {
+            bail!("no terminal on stderr; there is nothing to play on");
+        }
         app::run(&mut Forever, w, h)?;
         return Ok(0);
     };
 
     let mut cmd = Command::spawn(&argv)?;
+
+    // No terminal — a CI log, a pipe, a cron job. Run the command and get out
+    // of the way. Refusing here would mean a script that works becomes a script
+    // that fails the moment someone prefixes it with `adhd`, and the one
+    // promise this makes is that it never costs you your command.
+    if !term::attached() {
+        while !cmd.is_done() {
+            std::thread::sleep(app::STEP);
+        }
+        let code = cmd.exit_code();
+        if code != 0 {
+            cmd.replay_tail()?;
+        }
+        return Ok(code);
+    }
+
     let exit = app::run(&mut cmd, w, h)?;
 
     // The player leaving is not the command leaving: keep waiting, quietly, so

@@ -172,6 +172,13 @@ enum Mode {
         age: f32,
     },
     Play,
+    /// The clock stopped, holding whatever was on screen.
+    Paused,
+    /// The controls. `playing` records whether a run is waiting behind them, so
+    /// backing out returns to the game rather than dropping into a stale one.
+    Help {
+        playing: bool,
+    },
     /// The crash settle. `shown` climbs to the run's real score.
     Over {
         age: f32,
@@ -207,6 +214,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
     let mut played = Duration::ZERO;
     let mut frame_no: u32 = 0;
 
+    let mut term_size = (w0, h0);
     let mut accumulator = Duration::ZERO;
     let mut last = Instant::now();
     // Render frames the whole machine is frozen for. An impact that stops time
@@ -222,6 +230,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
 
         let poll = term::poll()?;
         if let Some((cw, ch)) = poll.resize {
+            term_size = (cw, ch);
             if cw >= term::MIN_SIZE.0 && ch >= term::MIN_SIZE.1 && (cw != stage.w || ch != stage.h)
             {
                 stage = Stage::new(kind, cw, ch);
@@ -231,7 +240,23 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         }
 
         if host.finished() {
+            // The command coming back must not quietly cost a good run: file it
+            // before the machine goes away.
+            if matches!(machine.mode, Mode::Play | Mode::Paused) {
+                scores.submit(kind, game.score());
+            }
             break Exit::Finished;
+        }
+
+        // A frame that shrank under the minimum cannot be drawn at all. Saying
+        // so beats drawing the old size into a smaller window, which is what
+        // ignoring it used to do.
+        if stage.w > term_size.0 || stage.h > term_size.1 {
+            stage.too_small();
+            presenter.frame(&stage.cells, &prev, stage.w, stage.h)?;
+            prev.copy_from_slice(&stage.cells);
+            std::thread::sleep(STEP.saturating_sub(frame_start.elapsed()));
+            continue;
         }
 
         // Esc leaves the game for the attract screen, and leaves the attract
@@ -240,6 +265,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         if poll.keys.quit {
             match machine.mode {
                 Mode::Attract { .. } => break Exit::Quit,
+                // Backing out of the controls or a pause returns to the game,
+                // not out of it: one key must never cost a run.
+                Mode::Help { playing } => machine.slide(leave_help(playing)),
+                Mode::Paused => machine.slide(Mode::Play),
                 _ => {
                     machine.go(Mode::Attract {
                         since: Instant::now(),
@@ -264,6 +293,8 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         }
         let mut steps = 0;
         while freeze == 0 && !closing && accumulator >= STEP && steps < MAX_STEPS {
+            // A held screen still runs its own step — that is how it notices the
+            // key that lets it go — but the game inside it does not advance.
             accumulator -= STEP;
             // Only the first step of a frame sees the input: catch-up steps run
             // neutral, so a hard drop never fires twice off one keypress.
@@ -283,6 +314,9 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         }
 
         stage.progress = host.progress();
+        // A held screen is held all the way down: the game, the background and
+        // the monitor's own hum all stop, or a pause looks like a freeze.
+        let held = matches!(machine.mode, Mode::Paused | Mode::Help { .. });
 
         // Whatever the game just did reaches the background and the screen
         // here, and nowhere else: no game knows the warp field exists.
@@ -313,7 +347,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         freeze = freeze.max(game.take_hitstop());
         // The background stops with everything else — a field still flying
         // through a frozen frame reads as a dropped frame, not as an impact.
-        if freeze == 0 {
+        if freeze == 0 && !held {
             stage.animate(STEP.as_secs_f32() * steps.max(1) as f32, game.heat());
         }
 
@@ -371,6 +405,8 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
                 stage.spin(reel, travel, best, blink, &tick);
             }
             Mode::Play => stage.game(game.as_ref(), best, blink, &tick),
+            Mode::Paused => stage.paused(game.as_ref(), best, blink, &tick),
+            Mode::Help { .. } => stage.help(kind, best, &tick),
             Mode::Over { age, score, rank } => {
                 let record = *rank == Some(0);
                 let settle = Settle {
@@ -414,7 +450,11 @@ fn advance(s: Sim) {
     let dts = STEP.as_secs_f32();
     match &mut s.machine.mode {
         Mode::Attract { since } => {
-            let start = s.keys.enter || s.keys.hard || s.keys.any();
+            if s.keys.help {
+                s.machine.slide(Mode::Help { playing: false });
+                return;
+            }
+            let start = s.keys.skip();
             let auto = s.host.autostart() && since.elapsed() >= AUTOSTART;
             if start || auto {
                 s.machine.go(spin_to(pick(s.rng, None), s.rng));
@@ -431,7 +471,28 @@ fn advance(s: Sim) {
                 s.machine.go(Mode::Play);
             }
         }
+        Mode::Paused => {
+            if s.keys.pause || s.keys.enter {
+                s.machine.slide(Mode::Play);
+            } else if s.keys.help {
+                s.machine.slide(Mode::Help { playing: true });
+            }
+        }
+        Mode::Help { playing } => {
+            if s.keys.skip() || s.keys.help {
+                let playing = *playing;
+                s.machine.slide(leave_help(playing));
+            }
+        }
         Mode::Play => {
+            if s.keys.pause {
+                s.machine.slide(Mode::Paused);
+                return;
+            }
+            if s.keys.help {
+                s.machine.slide(Mode::Help { playing: true });
+                return;
+            }
             *s.played += STEP;
             s.game.step(&input(s.keys), STEP);
             if s.game.is_over() {
@@ -459,17 +520,29 @@ fn advance(s: Sim) {
             };
             // Any key skips ahead: nobody should have to sit through the
             // ceremony twice.
-            if *age >= hold || s.keys.any() {
+            if *age >= hold || s.keys.skip() {
                 let rank = *rank;
                 s.machine.go(Mode::Board { age: 0.0, rank });
             }
         }
         Mode::Board { age, .. } => {
             *age += dts;
-            if *age >= BOARD_TIME || s.keys.any() {
+            if *age >= BOARD_TIME || s.keys.skip() {
                 let next = pick(s.rng, Some(*s.kind));
                 s.machine.go(spin_to(next, s.rng));
             }
+        }
+    }
+}
+
+/// Where backing out of the controls goes. Straight back into the run if there
+/// is one, and to the attract screen if the player was only reading.
+fn leave_help(playing: bool) -> Mode {
+    if playing {
+        Mode::Play
+    } else {
+        Mode::Attract {
+            since: Instant::now(),
         }
     }
 }

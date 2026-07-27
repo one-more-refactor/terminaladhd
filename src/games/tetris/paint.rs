@@ -36,7 +36,7 @@ fn ghost(b: &mut Buf, x0: i32, y0: i32, size: i32, mino: Mino) {
 
 fn hold_column(b: &mut Buf, l: &Layout, hold: Option<Mino>, ready: bool) {
     let Some((hx, hy)) = l.left_col else { return };
-    let inner = heading(b, l, hx as i32, 2 * hy as i32, "HOLD");
+    let inner = heading(b, l, hx as i32, 2 * hy as i32, "HOLD", "HLD");
     if let Some(m) = hold {
         // A spent hold is drawn at a third: the slot is visibly not available
         // again until the next piece locks.
@@ -52,7 +52,7 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Tetris) {
     let x = nx as i32;
     let p = l.mino_px as i32;
 
-    let mut y = heading(b, l, x, 2 * ny as i32, "NEXT");
+    let mut y = heading(b, l, x, 2 * ny as i32, "NEXT", "NXT");
     let deep = l.next_deep.min(g.next().len());
     for (i, &m) in g.next().iter().take(deep).enumerate() {
         // The queue recedes: the piece you get next is lit, the ones behind it
@@ -70,11 +70,13 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Tetris) {
         &[
             Stat {
                 label: "LINES",
+                short: "LN",
                 value: g.lines(),
                 hue: c(GREEN),
             },
             Stat {
                 label: "LEVEL",
+                short: "LV",
                 value: g.level(),
                 hue: c(MAGENTA),
             },

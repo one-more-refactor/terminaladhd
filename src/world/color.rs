@@ -15,10 +15,16 @@ impl Rgb {
         Rgb { r, g, b }
     }
 
+    // `add` and `mul` shadow the names of the std arithmetic traits on purpose.
+    // Implementing `Add`/`Mul` would let `a + b` compile for a type where the
+    // whole point is that light is added in linear space and only ever scaled
+    // by a scalar; naming them keeps every call site saying which it meant.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, o: Rgb) -> Rgb {
         Rgb::new(self.r + o.r, self.g + o.g, self.b + o.b)
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn mul(self, k: f32) -> Rgb {
         Rgb::new(self.r * k, self.g * k, self.b * k)
     }
@@ -66,8 +72,8 @@ pub fn hex(v: u32) -> Rgb {
 /// step -- that is what breaks up flat gradient bands.
 pub fn to_srgb8(c: Rgb, dither: f32) -> [u8; 3] {
     let f = |v: f32| -> u8 {
-        let s = linear_to_srgb(v.max(0.0).min(1.0)) * 255.0 + dither;
-        s.round().max(0.0).min(255.0) as u8
+        let s = linear_to_srgb(v.clamp(0.0, 1.0)) * 255.0 + dither;
+        s.round().clamp(0.0, 255.0) as u8
     };
     [f(c.r), f(c.g), f(c.b)]
 }

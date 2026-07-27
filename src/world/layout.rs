@@ -37,6 +37,16 @@ const BOTTOM_ROWS: usize = 3;
 /// Columns a side column needs to carry a piece preview and two readings.
 const SIDE_MIN: usize = 10;
 
+/// Sub-rows a column heading claims (label, air, hairline, air), a whole
+/// reading claims (a heading plus its value and a gap), and a folded reading
+/// claims (label and value on one line).
+pub const HEAD_SUB: usize = 9;
+pub const READOUT_SUB: usize = 13;
+pub const FOLDED_SUB: usize = 6;
+/// Air between whatever a game hangs at the top of its column and the readings
+/// underneath it.
+pub const COLUMN_GAP: usize = 5;
+
 /// Mino edges in sub-pixels, largest first. Ten is as big as a block reads
 /// before it is just a rectangle; two is as small as one reads at all.
 const MINO_SIZES: [usize; 7] = [10, 8, 6, 5, 4, 3, 2];
@@ -75,6 +85,9 @@ pub struct Layout {
     pub right_col: Option<(usize, usize)>,
     /// Pieces of lookahead the right column has room to show.
     pub next_deep: usize,
+    /// The column is too short for readings with headings of their own, so they
+    /// fold onto single lines.
+    pub compact_readouts: bool,
 }
 
 impl Layout {
@@ -117,10 +130,25 @@ impl Layout {
         let has_side = side >= SIDE_MIN;
         let left_col = has_side.then_some((2, arena.y0));
         let right_col = has_side.then_some((arena.x1 + 3, arena.y0));
-        // Each preview costs a mino plus a gap, and the queue may not run past
-        // the arena's own floor.
+        // The column runs from the arena's top to the ticker, and what always
+        // sits at the bottom of it is two readings — every game on this machine
+        // has exactly two, which is a shape rather than a coincidence. Whatever
+        // a game hangs above them gets the rest.
+        //
+        // On a short frame the readings fold onto single lines before the queue
+        // is cut to nothing: a NEXT of one piece is a worse game than a LEVEL
+        // without its own heading.
+        let ticker_sub = 2 * h.saturating_sub(3);
+        let column_sub = ticker_sub.saturating_sub(2 * arena.y0);
+        let full_foot = HEAD_SUB + COLUMN_GAP + 2 * READOUT_SUB;
+        let compact_readouts = column_sub < full_foot + (mino_px + 2);
+        let foot = if compact_readouts {
+            HEAD_SUB + COLUMN_GAP + 2 * FOLDED_SUB
+        } else {
+            full_foot
+        };
         let next_deep = if has_side {
-            (2 * arena.h() / (mino_px + 2)).clamp(1, 5)
+            (column_sub.saturating_sub(foot) / (mino_px + 2)).clamp(1, 5)
         } else {
             0
         };
@@ -136,11 +164,12 @@ impl Layout {
             rule_sub: 2 * TOP_ROWS - 1,
             // The ticker hangs off the bottom of the frame, which is the only
             // way a five-sub-row face fits the last row.
-            ticker_sub: 2 * h.saturating_sub(3),
+            ticker_sub,
             side,
             left_col,
             right_col,
             next_deep,
+            compact_readouts,
         }
     }
 
@@ -235,6 +264,31 @@ mod tests {
             for h in 24..=140 {
                 let p = kind.layout((3 * h).max(80), h).mino_px;
                 assert!((MINO_MIN..=10).contains(&p), "mino_px {p} at H={h}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_side_column_always_ends_inside_the_frame() {
+        // A queue that runs past the ticker, or a reading that runs off the
+        // right edge, is the failure this reserve exists to prevent.
+        for kind in ALL {
+            for (w, h) in sizes() {
+                let l = kind.layout(w, h);
+                let Some((x, y)) = l.right_col else { continue };
+                let each = if l.compact_readouts {
+                    FOLDED_SUB
+                } else {
+                    READOUT_SUB
+                };
+                let used = HEAD_SUB + l.next_deep * (l.mino_px + 2) + COLUMN_GAP + 2 * each;
+                assert!(
+                    2 * y + used <= l.ticker_sub,
+                    "{kind:?} {w}x{h}: column ends at {} past ticker {}",
+                    2 * y + used,
+                    l.ticker_sub
+                );
+                assert!(x < w, "{kind:?} {w}x{h}: column starts off-frame");
             }
         }
     }

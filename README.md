@@ -62,11 +62,18 @@ Everything reflows from `(width, height)` through a single layout solver, and
 the arena takes every row the chrome does not need. An 80×26 window and a
 400×100 one are the same screen at different scales.
 
-The picture is drawn at half-block sub-pixel resolution — each cell carries two
-stacked square pixels via `▀` — in linear light, with 4×4 ordered dithering,
-additive bloom over an emissive buffer, CRT scanlines, and a damage-tracked
-diff so only the cells that actually changed are sent. Frames are bracketed in
-DEC 2026 synchronized output, so a burst lands at once instead of tearing.
+And then it is put behind glass. The last pass is a cathode-ray tube: bloom,
+scanlines, corners that fall away, three guns that never quite converge, and a
+supply hum crawling down the picture. Cut a screen and the raster collapses to a
+line and then to a dot, the way a monitor does when the power goes — every
+screen change in the machine is one of those closing and the next one opening.
+Hit something big enough and it takes the horizontal hold with it.
+
+Underneath, the picture is drawn at half-block sub-pixel resolution — each cell
+carries two stacked square pixels via `▀` — in linear light, with 4×4 ordered
+dithering, additive bloom over an emissive buffer, and a damage-tracked diff so
+only the cells that actually changed are sent. Frames are bracketed in DEC 2026
+synchronized output, so a burst lands at once instead of tearing.
 
 ## Wrapping a command
 
@@ -86,6 +93,11 @@ stdout is inherited byte for byte, so this is still exactly `ls | wc -l`:
 $ adhd -- ls | wc -l
 ```
 
+With no terminal to draw on — a CI log, a pipe, a cron job — it does not
+refuse. It runs the command, hands back its code, and gets out of the way. A
+script that works should not stop working the moment someone prefixes it with
+`adhd`.
+
 Escape sequences in the child's output are stripped before they reach the
 ticker — subprocess text lands inside our frame, so an unsanitized one could
 repaint or corrupt the screen.
@@ -99,6 +111,8 @@ repaint or corrupt the screen.
 | `x` / `z` | rotate clockwise / counter-clockwise |
 | `space` | hard drop |
 | `c` | hold |
+| `p` | pause — the picture is held, not lost |
+| `?` | the controls, on their own screen |
 | any key | skip the ceremony after a run |
 | `esc` | leave the game; again to quit |
 
@@ -108,6 +122,9 @@ repaint or corrupt the screen.
 cargo build --release
 ./target/release/adhd
 ```
+
+`DESIGN.md` is the long version: why the screen is shaped this way, what was
+tried and thrown away, and what it would take to add a third game.
 
 No system dependencies. Needs at least 80×26 — a twenty-row playfield plus the
 strip and the ticker. `--size WxH` forces a size, and `--shot DIR` dumps every

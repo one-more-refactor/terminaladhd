@@ -5,7 +5,7 @@
 //! are wrapping — a shell pipeline downstream of `adhd -- cmd` must receive the
 //! command's bytes and nothing of ours.
 
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -27,6 +27,12 @@ pub const FALLBACK_SIZE: (usize, usize) = (120, 34);
 /// cell is two. That is twenty-six, and no arrangement of the chrome gets it
 /// lower without a second font.
 pub const MIN_SIZE: (usize, usize) = (80, 26);
+
+/// Whether there is a terminal to draw on at all. stderr, because that is
+/// where the picture goes — stdout may well be a pipe by design.
+pub fn attached() -> bool {
+    io::stderr().is_terminal()
+}
 
 /// Ask the terminal for its size, falling back to something playable.
 pub fn size() -> (usize, usize) {
@@ -137,6 +143,10 @@ pub struct Keys {
     pub hold: bool,
     pub enter: bool,
     pub back: bool,
+    /// Stop the clock without losing the run.
+    pub pause: bool,
+    /// Show the controls.
+    pub help: bool,
     /// Esc, q or Ctrl-C — leave whatever we are in.
     pub quit: bool,
 }
@@ -162,6 +172,8 @@ impl Keys {
                 self.up = true;
                 self.cw = true;
             }
+            KeyCode::Char('p') | KeyCode::Char('P') if !ctrl => self.pause = true,
+            KeyCode::Char('?') | KeyCode::F(1) => self.help = true,
             KeyCode::Char('x') | KeyCode::Char('X') => self.cw = true,
             KeyCode::Char('z') | KeyCode::Char('Z') => self.ccw = true,
             KeyCode::Char(' ') => self.hard = true,
@@ -190,6 +202,14 @@ impl Keys {
             || self.hold
             || self.enter
             || self.back
+    }
+
+    /// Anything the player could have meant as "get on with it". Deliberately
+    /// not [`Keys::any`]: pause and help are requests of their own, and a
+    /// ceremony that skipped because someone asked for the controls would be a
+    /// bug the player could not explain.
+    pub fn skip(&self) -> bool {
+        self.any() && !self.pause && !self.help
     }
 }
 
