@@ -2,9 +2,10 @@
 
 An arcade for the dead time.
 
-You hit enter on something slow. The terminal becomes a synthwave horizon —
-indigo sky, a slit-striped sun on the weld, a neon grid running to a vanishing
-point — and you play in it until your command comes back.
+![the machine running](assets/demo.gif)
+
+You hit enter on something slow. The terminal goes black, a wheel picks a game,
+and you play until your command comes back.
 
 ```
 adhd                    play until you quit
@@ -46,7 +47,7 @@ The rest is the arcade convention, near enough verbatim, because it is chrome
 every player already knows how to read: `1UP` blinking over the live score at
 the top left, the game's name in the middle, `HI` and the record at the right,
 and a hard vector frame around the arena — cyan where the walls are furniture,
-red where they kill. When a game has something to shout — TETRIS, GOLDEN, a
+amber where they kill. When a game has something to shout — TETRIS, GOLDEN, a
 streak — it takes the middle slot off its own name. A machine talks to you from
 its status strip.
 
@@ -86,7 +87,7 @@ under the status strip fills as it runs. When it exits, the screen folds away
 and `adhd` exits with the command's code — and on a failure, replays the last
 lines of its stderr so nothing is swallowed by the alternate screen.
 
-**stdout is never touched.** The world is drawn on stderr, and the child's
+**stdout is never touched.** The screen is drawn on stderr, and the child's
 stdout is inherited byte for byte, so this is still exactly `ls | wc -l`:
 
 ```
