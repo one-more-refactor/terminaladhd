@@ -162,6 +162,45 @@ It is brutal and still human, because a grounded piece keeps its full
 have to think, not how long you have to place. The curve runs 355 ms at the
 start, 190 at a minute, 135 at ninety seconds, and settles.
 
+## The loud moments
+
+A reaction is written as data — a list of beats, one per render frame — rather
+than as code, because the only way to tune a strobe is to read it as a rhythm.
+`on, off, on, off` is legible; the same pattern spread across branches is not.
+
+```rust
+pub const HUGE: &[Beat] = &[
+    beat(1.0, 0.3, 0.0),   // invert, wash, tear
+    beat(0.0, 0.9, 6.0),
+    beat(1.0, 0.0, 4.0),
+    ...
+];
+```
+
+Games never name a pattern. They name an *event* — `Kick::Small`, `Big`,
+`Huge`, `Bonus`, `Death` — and the shell decides how loud the screen gets, which
+is what stops two games reacting differently to the same kind of thing. A
+louder reaction displaces a quieter one that is already playing rather than
+queueing behind it: by the time a queued strobe played, whatever asked for it
+would be long over.
+
+Two rules hold for every pattern, and are tested. It ends dark, or the frame
+after it inherits whatever the pattern was doing. And it is at most twelve
+frames, because a strobe that outlasts the thing it is reacting to stops being
+an impact and becomes a fault.
+
+What is deliberately quiet: an ordinary apple. One arrives every second or two,
+and a screen that flashes that often is a screen nobody looks at. It has the
+hitstop, the marker and the frame flare already — the noise is being saved for
+the golden one.
+
+These are the most expensive frames the machine can draw, because a full-screen
+invert repaints every cell. On a metered link a pattern keeps its opening hit
+and loses its tail. Suppressing the inverts and keeping only the washes was
+tried first, on the theory that a wash over black falls under a loose tolerance
+and is nearly free; measured, it saved five per cent and cost most of the punch,
+so the length of the pattern is the dial and the flip stays.
+
 ## The monitor
 
 `world::crt` is the last pass, and everything in it is an artefact of a real

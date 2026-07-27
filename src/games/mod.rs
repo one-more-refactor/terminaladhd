@@ -50,6 +50,23 @@ pub struct Pop {
     pub life: f32,
 }
 
+/// What just happened, in the only terms the shell needs. A game names the
+/// event; the shell decides how loud the screen gets about it, which is what
+/// keeps two games reacting identically to the same kind of thing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kick {
+    /// A clear worth acknowledging and nothing more.
+    Small,
+    /// A clear worth interrupting the picture for.
+    Big,
+    /// The best thing this game has: a Tetris, a perfect clear.
+    Huge,
+    /// A bonus taken. Paid rather than interrupted, so it reads warm.
+    Bonus,
+    /// The run ending.
+    Death,
+}
+
 /// What the shell needs from a running game.
 pub trait Game {
     /// Which game this is. The shell needs it to cut the right arena for a
@@ -66,6 +83,12 @@ pub trait Game {
 
     /// Screen shake in whole cells, applied to the arena only.
     fn shake(&self) -> i32;
+
+    /// The loudest thing that happened since the last call, and nothing
+    /// afterwards.
+    fn take_kick(&mut self) -> Option<Kick> {
+        None
+    }
 
     /// Render frames the whole machine should freeze for, and zero afterwards.
     /// An impact that stops time reads as an impact; one that does not reads as

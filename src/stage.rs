@@ -73,6 +73,12 @@ pub struct Stage {
     pub invert: f32,
     /// Varies which bands tear, so consecutive frames do not shimmer in place.
     torn: u64,
+    /// The reaction currently playing, and how far into it we are.
+    fired: Option<(&'static [Beat], usize)>,
+    /// What colour the current reaction washes in.
+    fired_hue: Rgb,
+    /// Where the light rip is, `0..1` down the picture, and how hard.
+    rip: (f32, f32),
     /// Where the supply hum currently is, `0.0..=1.0` down the picture.
     hum: f32,
     /// What this frame is allowed to spend.
@@ -104,6 +110,17 @@ pub struct Quality {
     /// Frames a second. The other half of the bill — halving it halves the
     /// bytes, and neither of these games needs sixty.
     pub fps: u32,
+    /// Beats a full-screen reaction is allowed. Every one of them inverts or
+    /// washes the entire picture, which is the most expensive frame there is —
+    /// a full repaint, forty bytes a cell — so on a metered link a pattern
+    /// keeps its opening hit and loses its tail.
+    ///
+    /// Suppressing the inverts and keeping only the washes was tried, on the
+    /// theory that a wash on a black screen falls under a loose tolerance and
+    /// is nearly free. Measured, it saved five per cent and cost most of the
+    /// punch, so it is not done: the length of the pattern is the dial that
+    /// works, and the flip is what the pattern is for.
+    pub strobe_cap: usize,
 }
 
 impl Quality {
@@ -118,6 +135,7 @@ impl Quality {
             scanlines: true,
             tol: TOL_RICH,
             fps: 60,
+            strobe_cap: usize::MAX,
         }
     }
 
@@ -144,8 +162,109 @@ impl Quality {
             scanlines: true,
             tol: TOL_LEAN,
             fps: 30,
+            strobe_cap: 4,
         }
     }
+}
+
+/// One render frame of a full-screen reaction.
+///
+/// Written as data rather than as code because the only way to tune a strobe is
+/// to read it as a rhythm — `on, off, on, off` — and a pattern spread across
+/// branches cannot be read that way.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Beat {
+    /// How far toward the negative the whole picture goes.
+    pub invert: f32,
+    /// A flat wash of light over everything.
+    pub wash: f32,
+    /// Sub-pixels of lost horizontal hold.
+    pub tear: f32,
+}
+
+const fn beat(invert: f32, wash: f32, tear: f32) -> Beat {
+    Beat { invert, wash, tear }
+}
+const REST: Beat = beat(0.0, 0.0, 0.0);
+
+/// The named reactions. Every one is short: a strobe that outlasts the thing it
+/// is reacting to stops being an impact and becomes a fault.
+pub mod strobe {
+    use super::{beat, Beat, REST};
+
+    /// A single or a double. Enough to feel, gone before the next piece.
+    pub const CLEAR: &[Beat] = &[beat(0.0, 0.55, 0.0), beat(0.0, 0.18, 0.0), REST];
+
+    /// A triple, or a spin that cleared. One flip of the picture.
+    pub const BIG: &[Beat] = &[
+        beat(1.0, 0.0, 0.0),
+        beat(0.0, 0.7, 3.0),
+        beat(0.9, 0.0, 0.0),
+        beat(0.0, 0.25, 0.0),
+        REST,
+    ];
+
+    /// A Tetris or a perfect clear. Three flips and the hold going with them —
+    /// the loudest thing that happens inside a game.
+    pub const HUGE: &[Beat] = &[
+        beat(1.0, 0.3, 0.0),
+        beat(0.0, 0.9, 6.0),
+        beat(1.0, 0.0, 4.0),
+        beat(0.0, 0.6, 8.0),
+        beat(1.0, 0.0, 3.0),
+        beat(0.0, 0.35, 0.0),
+        beat(0.0, 0.15, 0.0),
+        REST,
+    ];
+
+    /// A bonus taken. Bright and warm rather than inverted: the picture is not
+    /// being interrupted, it is being paid.
+    pub const BONUS: &[Beat] = &[
+        beat(0.0, 0.9, 0.0),
+        beat(0.0, 0.35, 0.0),
+        beat(0.0, 0.7, 0.0),
+        beat(0.0, 0.2, 0.0),
+        REST,
+    ];
+
+    /// The run ending. Inverts hard, then the hold goes and stays gone for
+    /// longer than anything else — the machine losing its grip.
+    pub const DEATH: &[Beat] = &[
+        beat(1.0, 0.0, 0.0),
+        beat(1.0, 0.0, 9.0),
+        beat(0.0, 0.5, 11.0),
+        beat(0.8, 0.0, 8.0),
+        beat(0.0, 0.2, 6.0),
+        beat(0.0, 0.0, 4.0),
+        beat(0.0, 0.0, 2.0),
+        REST,
+    ];
+
+    /// The wheel stopping. Three hard hits with air between them, so the
+    /// landing reads as a slam and not as a fade-in.
+    pub const LAND: &[Beat] = &[
+        beat(0.0, 1.2, 0.0),
+        REST,
+        beat(0.0, 0.8, 4.0),
+        REST,
+        beat(0.0, 0.45, 0.0),
+        REST,
+    ];
+
+    /// A record. Long, alternating, and unapologetic — it is the one moment the
+    /// machine is allowed to keep going after the point has been made.
+    pub const RECORD: &[Beat] = &[
+        beat(0.0, 1.0, 0.0),
+        beat(1.0, 0.0, 0.0),
+        beat(0.0, 0.8, 0.0),
+        beat(1.0, 0.0, 0.0),
+        beat(0.0, 0.6, 0.0),
+        REST,
+        beat(0.0, 0.5, 0.0),
+        REST,
+        beat(0.0, 0.3, 0.0),
+        REST,
+    ];
 }
 
 /// The permanent misconvergence, in sub-pixels at the frame edge. Under one
@@ -171,6 +290,9 @@ impl Stage {
             tear: 0.0,
             invert: 0.0,
             torn: 0x9e3779b9,
+            fired: None,
+            fired_hue: c(WHITE),
+            rip: (0.0, 0.0),
             hum: 0.0,
             quality: Quality::full(),
             buf: Buf::new(w, h),
@@ -196,6 +318,34 @@ impl Stage {
     pub fn animate(&mut self, dt: f32, heat: f32) {
         self.warp.step(dt, heat);
         self.hum = (self.hum + dt / HUM_SECS).fract();
+    }
+
+    /// Fire a full-screen reaction. A louder one displaces a quieter one that
+    /// is already running rather than queueing behind it — by the time a
+    /// queued strobe played, whatever asked for it would be long over.
+    pub fn fire(&mut self, pattern: &'static [Beat], hue: Rgb) {
+        let pattern = &pattern[..pattern.len().min(self.quality.strobe_cap.max(1))];
+        let running = self.fired.map(|(p, _)| p.len()).unwrap_or(0);
+        if pattern.len() >= running {
+            self.fired = Some((pattern, 0));
+            self.fired_hue = hue;
+            // The rip starts at the top and crosses the picture over the
+            // pattern, so a long reaction is one sweep rather than a flicker.
+            self.rip = (0.0, 1.0);
+        }
+    }
+
+    /// Take this frame's beat, if a reaction is playing.
+    fn beat(&mut self) -> Beat {
+        let Some((pattern, i)) = self.fired else {
+            self.rip = (0.0, 0.0);
+            return Beat::default();
+        };
+        let b = pattern[i];
+        let next = i + 1;
+        self.fired = (next < pattern.len()).then_some((pattern, next));
+        self.rip = (next as f32 / pattern.len() as f32, self.rip.1);
+        b
     }
 
     // ------------------------------------------------------------- screens
@@ -538,10 +688,19 @@ impl Stage {
     /// the screen was showing.
     fn resolve(&mut self) {
         let (w, sh) = (self.buf.w, self.buf.sh);
+        // Whatever reaction is playing folds into this frame's one-off values,
+        // so a caller that sets `flash` directly and a fired pattern cannot
+        // fight over the same pixel.
+        let beat = self.beat();
+        let hue = self.fired_hue;
         // Consumed rather than cleared by the caller: a flash that outlives the
         // frame that asked for it is a white screen nobody can explain.
-        crt::invert(&mut self.px, std::mem::take(&mut self.invert));
-        crt::flash(&mut self.px, std::mem::take(&mut self.flash));
+        crt::invert(&mut self.px, std::mem::take(&mut self.invert).max(beat.invert));
+        crt::wash(&mut self.px, c(WHITE), std::mem::take(&mut self.flash));
+        crt::wash(&mut self.px, hue, beat.wash);
+        if self.rip.1 > 0.0 && beat.wash + beat.invert > 0.0 {
+            crt::rip(&mut self.px, w, sh, self.rip.0, hue, self.rip.1);
+        }
         let extra = std::mem::take(&mut self.fringe);
         if self.quality.fringe || extra > 0.0 {
             let rest = if self.quality.fringe { FRINGE_REST } else { 0.0 };
@@ -561,7 +720,7 @@ impl Stage {
             &mut self.scratch,
             w,
             sh,
-            std::mem::take(&mut self.tear),
+            std::mem::take(&mut self.tear).max(beat.tear),
             self.torn,
         );
         crt::collapse(&mut self.px, &mut self.scratch, w, sh, self.curtain);
@@ -644,6 +803,82 @@ pub fn clock(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn play(stage: &mut Stage, pattern: &'static [Beat]) -> Vec<Beat> {
+        stage.fire(pattern, c(WHITE));
+        (0..pattern.len() + 2).map(|_| stage.beat()).collect()
+    }
+
+    #[test]
+    fn a_reaction_plays_once_and_stops() {
+        let mut s = Stage::new(Kind::Tetris, 80, 26);
+        let beats = play(&mut s, strobe::CLEAR);
+        assert_eq!(beats.len(), strobe::CLEAR.len() + 2);
+        for (got, want) in beats.iter().zip(strobe::CLEAR) {
+            assert_eq!(got.wash, want.wash);
+        }
+        // And nothing afterwards: a strobe that outlives its cause is a fault.
+        let tail = &beats[strobe::CLEAR.len()..];
+        assert!(tail.iter().all(|b| b.wash == 0.0 && b.invert == 0.0));
+    }
+
+    #[test]
+    fn a_louder_reaction_displaces_a_quieter_one() {
+        let mut s = Stage::new(Kind::Tetris, 80, 26);
+        s.fire(strobe::CLEAR, c(WHITE));
+        s.beat();
+        s.fire(strobe::HUGE, c(WHITE));
+        // By the time a queued strobe played, whatever asked for it would be
+        // long over — so the big one takes the screen now.
+        assert_eq!(s.fired.map(|(p, i)| (p.len(), i)), Some((strobe::HUGE.len(), 0)));
+    }
+
+    #[test]
+    fn a_quieter_reaction_does_not_cut_a_louder_one_short() {
+        let mut s = Stage::new(Kind::Tetris, 80, 26);
+        s.fire(strobe::HUGE, c(WHITE));
+        s.beat();
+        s.fire(strobe::CLEAR, c(WHITE));
+        assert_eq!(s.fired.map(|(p, _)| p.len()), Some(strobe::HUGE.len()));
+    }
+
+    #[test]
+    fn every_pattern_ends_dark() {
+        // The last beat of every reaction has to be nothing, or the frame after
+        // it inherits whatever the pattern was doing.
+        for (name, p) in [
+            ("clear", strobe::CLEAR),
+            ("big", strobe::BIG),
+            ("huge", strobe::HUGE),
+            ("bonus", strobe::BONUS),
+            ("death", strobe::DEATH),
+            ("land", strobe::LAND),
+            ("record", strobe::RECORD),
+        ] {
+            let last = p.last().expect("a pattern with no beats");
+            assert_eq!(last.wash, 0.0, "{name} ends lit");
+            assert_eq!(last.invert, 0.0, "{name} ends inverted");
+            assert_eq!(last.tear, 0.0, "{name} ends torn");
+            assert!(p.len() <= 12, "{name} outlasts what it is reacting to");
+        }
+    }
+
+    #[test]
+    fn a_metered_link_gets_a_shorter_reaction_that_still_lets_go() {
+        let mut s = Stage::new(Kind::Tetris, 80, 26);
+        s.quality = Quality::lean();
+        s.fire(strobe::HUGE, c(WHITE));
+        let played: Vec<Beat> = (0..strobe::HUGE.len() + 2).map(|_| s.beat()).collect();
+        let lit = played.iter().filter(|b| b.wash + b.invert > 0.0).count();
+        assert!(lit <= Quality::lean().strobe_cap, "the cap did not hold");
+        // Cut short or not, the picture has to come back on its own.
+        assert!(
+            played[Quality::lean().strobe_cap..]
+                .iter()
+                .all(|b| b.wash == 0.0 && b.invert == 0.0 && b.tear == 0.0),
+            "a truncated reaction left the screen holding something"
+        );
+    }
 
     #[test]
     fn places_read_as_a_board() {

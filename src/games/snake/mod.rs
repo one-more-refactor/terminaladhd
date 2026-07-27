@@ -22,7 +22,7 @@ use crate::rng::Rng;
 use crate::world::layout::Layout;
 use crate::world::Buf;
 
-use super::{Game, Input, Kind, Pop};
+use super::{Game, Input, Kick, Kind, Pop};
 
 /// The arena, taken from the same place the layout takes it so the logic and
 /// the cut hole can never disagree.
@@ -146,6 +146,7 @@ pub struct Snake {
     /// Impact banked for the shell, drained once a frame.
     punch: f32,
     hitstop: u32,
+    kick: Option<Kick>,
     over: bool,
     /// `0.0..=1.0` once dead — how far the body has burned away.
     death: f32,
@@ -185,6 +186,7 @@ impl Snake {
             pops: Vec::new(),
             punch: 0.0,
             hitstop: 0,
+            kick: None,
             over: false,
             death: 0.0,
         }
@@ -375,6 +377,13 @@ impl Snake {
         self.hitstop = self
             .hitstop
             .max(if gold { HITSTOP_GOLD } else { HITSTOP_APPLE });
+        // An ordinary apple stays quiet. One arrives every second or two, and a
+        // screen that flashes that often is a screen nobody looks at — it has
+        // the hitstop, the marker and the frame flare already. The gold is what
+        // the noise is being saved for.
+        if gold {
+            self.kick = Some(Kick::Bonus);
+        }
         self.growth += if gold { GOLD_GROWTH } else { 1 };
         self.heat = (self.heat + if gold { 0.55 } else { 0.25 }).min(1.0);
         self.shake = self.shake.max(if gold { 2.0 } else { 1.0 });
@@ -401,6 +410,7 @@ impl Snake {
         self.shake = 3.0;
         self.punch = 1.0;
         self.hitstop = self.hitstop.max(HITSTOP_DEATH);
+        self.kick = Some(Kick::Death);
         self.heat = (self.heat + 0.4).min(1.0);
         self.queued.clear();
     }
@@ -513,6 +523,10 @@ impl Game for Snake {
 
     fn take_hitstop(&mut self) -> u32 {
         std::mem::take(&mut self.hitstop)
+    }
+
+    fn take_kick(&mut self) -> Option<Kick> {
+        self.kick.take()
     }
 
     fn pops(&self) -> &[Pop] {

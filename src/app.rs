@@ -13,10 +13,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crate::games::{Game, Input, Kind, ALL};
+use crate::games::{Game, Input, Kick, Kind, ALL};
 use crate::rng::Rng;
 use crate::scores::Table;
-use crate::stage::{clock, Quality, Settle, Stage, Tick};
+use crate::stage::{clock, strobe, Quality, Settle, Stage, Tick};
+use crate::world::scene::palette::*;
+use crate::world::hex;
 use crate::term::{self, Keys};
 
 /// One sim step. ARR is one step, so the handling machine's real-millisecond
@@ -353,6 +355,20 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                 }
             }
         }
+        // What the game says happened, in the loudest terms the screen has.
+        // The games never name a pattern; they name an event, and the mapping
+        // lives here so both of them react identically to the same kind of
+        // thing.
+        if let Some(kick) = game.take_kick() {
+            let (pattern, hue) = match kick {
+                Kick::Small => (strobe::CLEAR, hex(WHITE)),
+                Kick::Big => (strobe::BIG, hex(WHITE)),
+                Kick::Huge => (strobe::HUGE, hex(WHITE)),
+                Kick::Bonus => (strobe::BONUS, hex(YELLOW)),
+                Kick::Death => (strobe::DEATH, hex(WHITE)),
+            };
+            stage.fire(pattern, hue);
+        }
         freeze = freeze.max(game.take_hitstop());
         // The background stops with everything else — a field still flying
         // through a frozen frame reads as a dropped frame, not as an impact.
@@ -417,8 +433,6 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                 // Ease out hard: almost all the travel happens in the first
                 // third, so the wheel is visibly fighting to stop.
                 let travel = 1.0 - (1.0 - t).powi(4);
-                // The landing is a hit, not an arrival.
-                stage.flash = (t * 14.0 - 13.0).max(0.0) * 0.9;
                 stage.spin(reel, travel, best, blink, &tick);
             }
             Mode::Play => stage.game(game.as_ref(), best, blink, &tick),
@@ -481,6 +495,10 @@ fn advance(s: Sim) {
             *age += dts;
             if *age >= SPIN_TIME.as_secs_f32() {
                 let landed = *reel.last().unwrap_or(&Kind::Tetris);
+                // The wheel stopping is the loudest thing outside a game, and
+                // it lands in the game's own colour so the answer is legible
+                // before the picture has finished arriving.
+                s.stage.fire(strobe::LAND, landed.hue());
                 *s.kind = landed;
                 s.stage.retarget(landed);
                 *s.game = landed.spawn(Rng::new());
@@ -518,6 +536,9 @@ fn advance(s: Sim) {
                 // No cut: the crash, the dissolve and the settle are one
                 // continuous thing, and cutting away from it would throw out
                 // the part worth watching.
+                if rank == Some(0) {
+                    s.stage.fire(strobe::RECORD, hex(YELLOW));
+                }
                 s.machine.slide(Mode::Over {
                     age: 0.0,
                     score,

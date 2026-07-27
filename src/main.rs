@@ -145,7 +145,17 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     dump(&stage, "lean")?;
     stage.quality = terminaladhd::stage::Quality::full();
 
-    // The loudest frame the machine has: hold lost, guns apart, chassis moved.
+    // Every beat of the loudest reaction the machine has, so a still can show
+    // what a Tetris actually looks like rather than only describing it.
+    stage.fire(
+        terminaladhd::stage::strobe::HUGE,
+        terminaladhd::world::hex(0xFFFFFF),
+    );
+    for i in 0..4 {
+        stage.game(mid.as_ref(), 9200, true, &tick);
+        dump(&stage, &format!("huge-{i}"))?;
+    }
+
     stage.help(Kind::Tetris, 9200, &tick);
     dump(&stage, "help")?;
 

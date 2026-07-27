@@ -18,7 +18,7 @@ pub mod skin;
 
 use std::time::Duration;
 
-use crate::games::{Game, Input, Kind, Pop};
+use crate::games::{Game, Input, Kick, Kind, Pop};
 use crate::rng::Rng;
 use crate::world::layout::Layout;
 use crate::world::Buf;
@@ -119,6 +119,7 @@ pub struct Tetris {
     /// Impact banked for the shell, drained once a frame.
     punch: f32,
     hitstop: u32,
+    kick: Option<Kick>,
     over: bool,
 }
 
@@ -153,6 +154,7 @@ impl Tetris {
             pops: Vec::new(),
             punch: 0.0,
             hitstop: 0,
+            kick: None,
             over: false,
         };
         game.refill();
@@ -443,10 +445,15 @@ impl Tetris {
             });
         }
         if cleared {
-            self.hitstop = self.hitstop.max(if rows.len() >= 4 || perfect {
-                HITSTOP_BIG
-            } else {
-                HITSTOP_CLEAR
+            let huge = rows.len() >= 4 || perfect;
+            self.hitstop = self.hitstop.max(if huge { HITSTOP_BIG } else { HITSTOP_CLEAR });
+            // A spin that cleared is worth as much noise as a triple: it is the
+            // hardest thing in the game to set up and the easiest to miss.
+            let spun = !matches!(action, Action::LineClear(_));
+            self.kick = Some(match () {
+                _ if huge => Kick::Huge,
+                _ if rows.len() >= 3 || spun => Kick::Big,
+                _ => Kick::Small,
             });
         }
         self.back_to_back = back_to_back;
@@ -458,6 +465,7 @@ impl Tetris {
                 self.over = true;
                 self.punch = 1.0;
                 self.hitstop = self.hitstop.max(HITSTOP_OVER);
+                self.kick = Some(Kick::Death);
             }
             return;
         }
@@ -698,6 +706,10 @@ impl Game for Tetris {
 
     fn take_hitstop(&mut self) -> u32 {
         std::mem::take(&mut self.hitstop)
+    }
+
+    fn take_kick(&mut self) -> Option<Kick> {
+        self.kick.take()
     }
 
     fn pops(&self) -> &[Pop] {

@@ -254,15 +254,45 @@ pub fn invert(px: &mut [Rgb], amount: f32) {
     }
 }
 
-/// Add a flat wash of white to the whole frame — the moment a thing lands,
+/// Add a flat wash of colour to the whole frame — the moment a thing lands,
 /// before any of the above has a chance to be subtle about it.
-pub fn flash(px: &mut [Rgb], amount: f32) {
+///
+/// White is the default because white is what a phosphor screen does when it is
+/// driven past what it can hold, but a hue carries which *kind* of thing landed:
+/// gold for a bonus, the piece's own colour for a clear.
+pub fn wash(px: &mut [Rgb], col: Rgb, amount: f32) {
     if amount <= 0.0 {
         return;
     }
-    let wash = Rgb::new(1.0, 1.0, 1.0).mul(amount.clamp(0.0, 1.0));
+    let wash = col.mul(amount.clamp(0.0, 2.0));
     for p in px.iter_mut() {
         *p = p.add(wash);
+    }
+}
+
+/// A hard band of light ripping down the picture. Where [`hum`] is the slow
+/// artefact of a supply that never quite settled, this is the fast one: the
+/// beam overdriven for a few lines, which is what a cabinet did when something
+/// large happened and it had nothing louder left than the tube itself.
+pub fn rip(px: &mut [Rgb], w: usize, sh: usize, pos: f32, col: Rgb, strength: f32) {
+    if strength <= 0.0 || !(0.0..=1.0).contains(&pos) {
+        return;
+    }
+    let band = (sh as f32 * 0.10).max(3.0);
+    let head = pos * (sh as f32 + band) - band * 0.5;
+    for y in 0..sh {
+        let d = (y as f32 - head).abs();
+        if d > band * 0.5 {
+            continue;
+        }
+        // Hard in the middle and gone at the edges, so it reads as one bright
+        // line rather than as a grey block sliding past.
+        let k = 1.0 - (d / (band * 0.5));
+        let add = col.mul(strength * k * k);
+        let row = y * w;
+        for x in 0..w {
+            px[row + x] = px[row + x].add(add);
+        }
     }
 }
 
@@ -390,6 +420,26 @@ mod tests {
         let before = px.clone();
         let mut scratch = Vec::new();
         tear(&mut px, &mut scratch, w, sh, 0.0, 1);
+        assert_eq!(px, before);
+    }
+
+    #[test]
+    fn a_rip_lights_one_band_and_leaves_the_rest() {
+        let (w, sh) = (8, 60);
+        let mut px = vec![Rgb::ZERO; w * sh];
+        rip(&mut px, w, sh, 0.5, Rgb::new(1.0, 1.0, 1.0), 1.0);
+        let lit = (0..sh).filter(|&y| px[y * w].r > 0.01).count();
+        assert!(lit > 0 && lit < sh / 2, "one band, not the picture: {lit}");
+        // Brightest at its centre.
+        let peak = (0..sh).max_by(|a, b| px[a * w].r.total_cmp(&px[b * w].r)).unwrap();
+        assert!((peak as i32 - sh as i32 / 2).abs() < 4, "peak at {peak}");
+    }
+
+    #[test]
+    fn a_wash_of_nothing_changes_nothing() {
+        let mut px = field(4, 4);
+        let before = px.clone();
+        wash(&mut px, Rgb::new(1.0, 1.0, 1.0), 0.0);
         assert_eq!(px, before);
     }
 
