@@ -16,7 +16,7 @@ use std::time::Duration;
 use crate::games::{Game, Kind};
 use crate::scores::Entry;
 use crate::world::cabinet::{ground, pop, rule, strip, ticker, Strip};
-use crate::world::draw::{lit, text, text_center, text_w};
+use crate::world::draw::{lit, ring, text, text_center, text_w};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
 use crate::world::crt;
@@ -82,6 +82,8 @@ pub struct Stage {
     fired_hue: Rgb,
     /// Where the light rip is, `0..1` down the picture, and how hard.
     rip: (f32, f32),
+    /// How hard the wheel has just landed, `0.0..=1.0`, decaying.
+    pub slam: f32,
     /// The last score drawn, and how much the strip is still lifting from the
     /// change — the score is what the machine is about, and a number that never
     /// reacts is one nobody watches.
@@ -248,14 +250,32 @@ pub mod strobe {
         REST,
     ];
 
-    /// The wheel stopping. Three hard hits with air between them, so the
-    /// landing reads as a slam and not as a fade-in.
+    /// The wheel stopping. It hits, flips, hits again and rings down — a detent
+    /// catching rather than a light coming on.
     pub const LAND: &[Beat] = &[
-        beat(0.0, 1.2, 0.0),
+        beat(0.0, 1.5, 0.0),
+        beat(1.0, 0.0, 6.0),
+        beat(0.0, 1.0, 4.0),
         REST,
-        beat(0.0, 0.8, 4.0),
+        beat(0.0, 0.7, 3.0),
         REST,
-        beat(0.0, 0.45, 0.0),
+        beat(0.0, 0.4, 0.0),
+        REST,
+        beat(0.0, 0.2, 0.0),
+        REST,
+    ];
+
+    /// A coin going in. Two hard hits and a long fall-off — the weight is in
+    /// the tail, because a credit is the machine waking up rather than
+    /// something happening to it.
+    pub const COIN: &[Beat] = &[
+        beat(0.0, 1.3, 0.0),
+        beat(0.0, 0.5, 5.0),
+        beat(1.0, 0.0, 0.0),
+        beat(0.0, 0.7, 3.0),
+        beat(0.0, 0.4, 0.0),
+        beat(0.0, 0.25, 0.0),
+        beat(0.0, 0.12, 0.0),
         REST,
     ];
 
@@ -302,6 +322,7 @@ impl Stage {
             fired: None,
             fired_hue: c(WHITE),
             rip: (0.0, 0.0),
+            slam: 0.0,
             shown_score: 0,
             score_hot: 0.0,
             hum: 0.0,
@@ -402,6 +423,40 @@ impl Stage {
         self.close(0, best, demo.kind().name(), blink, tick);
     }
 
+    /// A credit going in. The marquee is still up and nothing has been decided
+    /// yet — this is the half-second of the machine noticing, which every
+    /// cabinet had and which is most of why putting a coin in felt like
+    /// something.
+    pub fn coin(&mut self, demo: &dyn Game, age: f32, best: u32, tick: &Tick) {
+        self.open(0.4);
+        let mut bare = demo.kind().layout(self.w, self.h);
+        bare.left_col = None;
+        bare.right_col = None;
+        demo.paint(&mut self.buf, &bare);
+        self.dim_all(0.18);
+
+        let cx = self.layout.w as i32 / 2;
+        let mid = self.layout.h as f32;
+        let scale = hero_scale("CREDIT", self.layout.w, 3);
+        chrome_word(&mut self.buf, "CREDIT", scale, self.layout.w as f32 * 0.5, mid - 6.0);
+        // The count lands on the frame the coin does and sits there. One
+        // credit, because there is only ever one game about to happen.
+        text_center(&mut self.buf, "01", cx, mid as i32 + 5 * scale as i32 - 2, 2, c(YELLOW), 1.2);
+        // A ring going out from the middle, once, on the first third.
+        if age < 0.2 {
+            let r = age / 0.2;
+            ring(
+                &mut self.buf,
+                self.layout.w as f32 * 0.5,
+                mid,
+                r * self.layout.w as f32 * 0.55,
+                5.0,
+                c(WHITE).mul(1.0 - r),
+            );
+        }
+        self.close(0, best, "CREDIT", true, tick);
+    }
+
     /// The roulette: names flying through the warp toward the player and
     /// slamming to a stop on the one that won.
     pub fn spin(&mut self, reel: &[Kind], travel: f32, best: u32, blink: bool, tick: &Tick) {
@@ -428,6 +483,13 @@ impl Stage {
                 1
             };
             chrome_word(&mut self.buf, k.name(), scale, l_w * 0.5 + dx, mid);
+            // On the frames right after it stops, the winner is drawn again a
+            // step off itself. Two frames of double image is what a thing
+            // arriving hard looks like when it cannot actually be scaled.
+            if travel >= 1.0 && near > 0.82 && self.slam > 0.0 {
+                let off = self.slam * 3.0;
+                chrome_word(&mut self.buf, k.name(), scale, l_w * 0.5 + dx + off, mid);
+            }
         }
 
         // Two hard bars marking the slot, clear of the longest name on the reel

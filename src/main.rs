@@ -127,8 +127,17 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     stage.attract(demo.as_ref(), 9200, true, 0.0, &tick);
     dump(&stage, "attract")?;
 
+    stage.coin(demo.as_ref(), 0.1, 9200, &tick);
+    dump(&stage, "coin")?;
+
     stage.spin(&[Kind::Tetris, Kind::Snake, Kind::Tetris], 0.68, 9200, true, &tick);
     dump(&stage, "spin")?;
+
+    // The frame the wheel stops on, with the winner doubled off itself.
+    stage.slam = 1.0;
+    stage.spin(&[Kind::Snake, Kind::Tetris, Kind::Snake], 1.0, 9200, true, &tick);
+    dump(&stage, "land")?;
+    stage.slam = 0.0;
 
     // Mid-cut: the raster half collapsed, which is what every screen change
     // passes through and the thing a still cannot otherwise show.

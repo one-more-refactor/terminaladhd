@@ -34,10 +34,15 @@ const MAX_STEPS: u32 = 8;
 /// the way of the thing you actually started.
 const AUTOSTART: Duration = Duration::from_millis(700);
 
-/// How long the wheel turns, and how many slots it travels. Everything between
-/// two games is dead time, so it is as short as it can be and still read as a
-/// spin rather than as a cut.
-const SPIN_TIME: Duration = Duration::from_millis(950);
+/// How long a credit takes to go in. The one piece of dead time on this machine
+/// that is worth having: a cabinet that started the instant you touched it
+/// never felt like it had accepted anything.
+const COIN_TIME: f32 = 0.55;
+
+/// How long the wheel turns, how long the winner is held after it stops, and
+/// how many slots it travels.
+const SPIN_TIME: Duration = Duration::from_millis(1350);
+const SPIN_HOLD: f32 = 0.42;
 const SPIN_SLOTS: usize = 9;
 
 /// The settle after a crash: how long the picture takes to go down, how long
@@ -174,7 +179,12 @@ enum Mode {
     Attract {
         since: Instant,
     },
-    /// The wheel, turning toward `reel`'s last slot.
+    /// A credit going in, before anything has been decided.
+    Coin {
+        age: f32,
+        next: Vec<Kind>,
+    },
+    /// The wheel, turning toward `reel`'s last slot and then holding on it.
     Spin {
         reel: Vec<Kind>,
         age: f32,
@@ -437,11 +447,16 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                     stage.board(demo_kind, &rows, None, idle, scores.best(demo_kind), &teach);
                 }
             }
+            Mode::Coin { age, .. } => {
+                stage.coin(demo.as_ref(), *age, scores.best(demo_kind), &tick)
+            }
             Mode::Spin { reel, age } => {
                 let t = (age / SPIN_TIME.as_secs_f32()).clamp(0.0, 1.0);
-                // Ease out hard: almost all the travel happens in the first
-                // third, so the wheel is visibly fighting to stop.
-                let travel = 1.0 - (1.0 - t).powi(4);
+                // Ease out to the fifth: nearly all the travel is spent in the
+                // first third and the last few slots crawl past, which is the
+                // whole difference between a wheel and a fade.
+                let travel = 1.0 - (1.0 - t).powi(5);
+                stage.slam = (stage.slam - 0.12).max(0.0);
                 stage.spin(reel, travel, best, blink, &tick);
             }
             Mode::Play => stage.game(game.as_ref(), best, blink, &tick),
@@ -497,17 +512,39 @@ fn advance(s: Sim) {
             let start = s.keys.skip();
             let auto = s.host.autostart() && since.elapsed() >= AUTOSTART;
             if start || auto {
-                s.machine.go(spin_to(pick(s.rng, None), s.rng));
+                // The coin goes in behind a cut of its own, and the wheel it
+                // will turn is decided now so the credit screen is already
+                // holding the answer it has not shown yet.
+                let Mode::Spin { reel, .. } = spin_to(pick(s.rng, None), s.rng) else {
+                    return;
+                };
+                s.stage.fire(strobe::COIN, hex(YELLOW));
+                s.machine.slide(Mode::Coin {
+                    age: 0.0,
+                    next: reel,
+                });
+            }
+        }
+        Mode::Coin { age, next } => {
+            *age += dts;
+            if *age >= COIN_TIME {
+                let reel = std::mem::take(next);
+                s.machine.go(Mode::Spin { reel, age: 0.0 });
             }
         }
         Mode::Spin { reel, age } => {
             *age += dts;
-            if *age >= SPIN_TIME.as_secs_f32() {
+            // The wheel stops, and then the name it stopped on is held. Cutting
+            // on the frame it lands throws away the only moment the answer is
+            // actually on screen.
+            let travel = SPIN_TIME.as_secs_f32();
+            if *age >= travel && *age - dts < travel {
                 let landed = *reel.last().unwrap_or(&Kind::Tetris);
-                // The wheel stopping is the loudest thing outside a game, and
-                // it lands in the game's own colour so the answer is legible
-                // before the picture has finished arriving.
                 s.stage.fire(strobe::LAND, landed.hue());
+                s.stage.slam = 1.0;
+            }
+            if *age >= travel + SPIN_HOLD {
+                let landed = *reel.last().unwrap_or(&Kind::Tetris);
                 *s.kind = landed;
                 s.stage.retarget(landed);
                 *s.game = landed.spawn(Rng::new());
@@ -713,6 +750,46 @@ mod tests {
         });
         while m.cut(0.016) && !matches!(m.mode, Mode::Board { .. }) {}
         assert!(matches!(m.mode, Mode::Board { .. }), "the first one won");
+    }
+
+    #[test]
+    fn a_coin_holds_the_wheel_it_has_already_decided() {
+        // The reel is picked when the credit goes in, so the credit screen is
+        // already holding an answer it has not shown yet. Losing it there would
+        // mean re-rolling after the ceremony, which is a different game.
+        let mut rng = Rng::from_seed(21);
+        let Mode::Spin { reel, .. } = spin_to(Kind::Snake, &mut rng) else {
+            panic!("spin_to built the wrong mode");
+        };
+        let coin = Mode::Coin {
+            age: 0.0,
+            next: reel.clone(),
+        };
+        let Mode::Coin { next, .. } = coin else {
+            unreachable!()
+        };
+        assert_eq!(next, reel);
+        assert_eq!(next.last(), Some(&Kind::Snake));
+    }
+
+    #[test]
+    fn the_ceremony_is_long_enough_to_be_one_and_short_enough_to_forgive() {
+        // Everything between pressing a key and playing is dead time, and this
+        // is the one stretch of it worth having. Two and a half seconds is a
+        // cabinet accepting a coin; five is a loading screen.
+        let total = COIN_TIME + SPIN_TIME.as_secs_f32() + SPIN_HOLD;
+        assert!(total > 1.8, "too quick to read as a ceremony: {total}");
+        assert!(total < 2.8, "too long to sit through twice: {total}");
+    }
+
+    #[test]
+    fn the_wheel_crawls_before_it_stops() {
+        // Ease-out to the fifth. What matters is that the last slots pass
+        // slowly enough to be read, or the wheel is a fade with extra steps.
+        let travel = |t: f32| 1.0 - (1.0 - t).powi(5);
+        let early = travel(0.2) - travel(0.1);
+        let late = travel(1.0) - travel(0.9);
+        assert!(early > late * 8.0, "the wheel does not slow: {early} vs {late}");
     }
 
     #[test]
