@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use crate::rng::Rng;
 use crate::world::layout::Layout;
-use crate::world::Buf;
+use crate::world::{Buf, Sparks};
 
 use super::{Game, Input, Kick, Kind, Pop};
 
@@ -147,6 +147,9 @@ pub struct Snake {
     punch: f32,
     hitstop: u32,
     kick: Option<Kick>,
+    /// Debris. An apple bursts when it is taken and the body comes apart when
+    /// the run ends.
+    pub(crate) sparks: Sparks,
     over: bool,
     /// `0.0..=1.0` once dead — how far the body has burned away.
     death: f32,
@@ -187,6 +190,7 @@ impl Snake {
             punch: 0.0,
             hitstop: 0,
             kick: None,
+            sparks: Sparks::new(),
             over: false,
             death: 0.0,
         }
@@ -388,6 +392,17 @@ impl Snake {
         self.heat = (self.heat + if gold { 0.55 } else { 0.25 }).min(1.0);
         self.shake = self.shake.max(if gold { 2.0 } else { 1.0 });
 
+        // The apple comes apart where it was taken. Gold rises rather than
+        // falls, because it is light being paid out rather than matter.
+        let at = (self.apple.at.0 as f32 + 0.5, self.apple.at.1 as f32 + 0.5);
+        if gold {
+            let hue = crate::world::hex(0xFFE100);
+            self.sparks.burst(&mut self.rng, at, 18, 16.0, hue);
+            self.sparks.glimmer(&mut self.rng, at, 10, hue);
+        } else {
+            self.sparks
+                .burst(&mut self.rng, at, 10, 11.0, crate::world::hex(0x00FF87));
+        }
         self.punch = self.punch.max(if gold { 0.9 } else { 0.45 });
         if gold {
             self.shout = Some(("GOLDEN".into(), 1.0));
@@ -411,6 +426,16 @@ impl Snake {
         self.punch = 1.0;
         self.hitstop = self.hitstop.max(HITSTOP_DEATH);
         self.kick = Some(Kick::Death);
+        // The whole body goes at once. The dissolve that follows is what is
+        // left of it burning down; this is the impact.
+        let body: Vec<(i32, i32)> = self.body.iter().copied().collect();
+        let n = body.len().max(1) as f32;
+        for (i, &(x, y)) in body.iter().enumerate() {
+            let t = i as f32 / n;
+            let hue = crate::world::hex(0x00F0FF).lerp(crate::world::hex(0xFF23C8), t);
+            self.sparks
+                .burst(&mut self.rng, (x as f32 + 0.5, y as f32 + 0.5), 3, 13.0, hue);
+        }
         self.heat = (self.heat + 0.4).min(1.0);
         self.queued.clear();
     }
@@ -461,6 +486,7 @@ impl Game for Snake {
             p.life -= dts / POP_SECS;
         }
         self.pops.retain(|p| p.life > 0.0);
+        self.sparks.step(dts);
 
         // Dead snakes still burn: the shell keeps stepping so the dissolve runs
         // on the same clock as everything else.
@@ -527,6 +553,10 @@ impl Game for Snake {
 
     fn take_kick(&mut self) -> Option<Kick> {
         self.kick.take()
+    }
+
+    fn tally(&self) -> [(&'static str, u32); 2] {
+        [("APPLES", self.eaten), ("LENGTH", self.body.len() as u32)]
     }
 
     fn pops(&self) -> &[Pop] {

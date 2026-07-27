@@ -181,10 +181,27 @@ impl Keys {
                 self.up = true;
                 self.cw = true;
             }
-            KeyCode::Char('h') | KeyCode::Char('H') if !ctrl => self.left = true,
-            KeyCode::Char('l') | KeyCode::Char('L') if !ctrl => self.right = true,
-            KeyCode::Char('j') | KeyCode::Char('J') if !ctrl => self.down = true,
-            KeyCode::Char('k') | KeyCode::Char('K') if !ctrl => {
+            // Three ways to move, because the machine has no idea whose hands
+            // are on it: arrows, vim, and the left-hand grip everyone who has
+            // ever played anything already has.
+            KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('a') | KeyCode::Char('A')
+                if !ctrl =>
+            {
+                self.left = true
+            }
+            KeyCode::Char('l') | KeyCode::Char('L') | KeyCode::Char('d') | KeyCode::Char('D')
+                if !ctrl =>
+            {
+                self.right = true
+            }
+            KeyCode::Char('j') | KeyCode::Char('J') | KeyCode::Char('s') | KeyCode::Char('S')
+                if !ctrl =>
+            {
+                self.down = true
+            }
+            KeyCode::Char('k') | KeyCode::Char('K') | KeyCode::Char('w') | KeyCode::Char('W')
+                if !ctrl =>
+            {
                 self.up = true;
                 self.cw = true;
             }

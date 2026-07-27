@@ -19,6 +19,7 @@ pub mod encode;
 pub mod font;
 pub mod layout;
 pub mod scene;
+pub mod spark;
 pub mod warp;
 pub mod tiny;
 
@@ -33,4 +34,5 @@ pub use scene::{
     bloom, chrome_ramp, chrome_word, chrome_word_w, palette, resolve_no_bloom, scanlines,
     smoothstep, Buf, Ramp,
 };
+pub use spark::Sparks;
 pub use warp::Warp;

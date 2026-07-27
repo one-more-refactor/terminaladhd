@@ -217,6 +217,7 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Snake) {
 
     apple(b, l, g, shake, t);
     body(b, l, g, shake);
+    g.sparks.draw(b, l, shake);
 
     right_column(b, l, g);
 }

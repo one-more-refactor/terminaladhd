@@ -8,7 +8,7 @@
 //! greyed to say it is inactive — it is either lit or it is not drawn.
 
 use crate::games::Kind;
-use crate::world::cabinet::{burst, floor, frame, heading, readouts, Rule, Stat};
+use crate::world::cabinet::{burst, floor, frame, heading, Rule};
 use crate::world::draw::{add_emis, capsule, lit};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
@@ -80,26 +80,6 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Tetris) {
         y += pitch;
     }
 
-    readouts(
-        b,
-        l,
-        x,
-        y + 5,
-        &[
-            Stat {
-                label: "LINES",
-                short: "LN",
-                value: g.lines(),
-                hue: c(GREEN),
-            },
-            Stat {
-                label: "LEVEL",
-                short: "LV",
-                value: g.level(),
-                hue: c(MAGENTA),
-            },
-        ],
-    );
 }
 
 pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
@@ -119,9 +99,17 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
     // The frame ignites while rows are lit and cools as they collapse, and its
     // lights run faster the better the player is doing — the same thing the
     // warp field is saying, said again where the eye already is.
-    let ignite = if clearing.is_empty() { 0.0 } else { 0.9 };
-    let chase = g.elapsed.as_secs_f32() * (0.45 + 1.6 * g.heat());
-    frame(b, l, shake, Kind::Tetris.hue(), ignite, chase);
+    let ignite: f32 = if clearing.is_empty() { 0.0 } else { 0.9 };
+    // A stack near the top pulls the frame off its own colour toward the
+    // hazard, and pulses. Nothing says "you are about to lose" in words.
+    let danger = g.danger();
+    let pulse = (g.elapsed.as_secs_f32() * 9.0).sin() * 0.5 + 0.5;
+    let hue = Kind::Tetris
+        .hue()
+        .lerp(c(ORANGE), danger * (0.55 + 0.45 * pulse));
+    let ignite = ignite.max(danger * 0.35 * pulse);
+    let chase = g.elapsed.as_secs_f32() * (0.45 + 1.6 * g.heat() + 2.4 * danger);
+    frame(b, l, shake, hue, ignite, chase);
 
     // The stack falls into a cleared gap over about a tenth of a second. A
     // block is drawn as many rows above where it now logically sits as there
@@ -212,6 +200,7 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
         );
     }
 
+    g.sparks.draw(b, l, shake);
     hold_column(b, l, g.hold(), g.hold_ready());
     right_column(b, l, g);
 }

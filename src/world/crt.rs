@@ -186,6 +186,37 @@ pub fn collapse(px: &mut [Rgb], scratch: &mut Vec<Rgb>, w: usize, sh: usize, t: 
     }
 }
 
+/// The horizontal wobble of a tube that has just been switched on, settling as
+/// it warms. Rows are displaced by a sine that decays from the top of the
+/// picture to the bottom and from the start of the effect to the end.
+///
+/// `amount` is the worst displacement in sub-pixels and `phase` advances the
+/// wave, so a caller that fades `amount` to zero gets a degauss.
+pub fn wobble(px: &mut [Rgb], scratch: &mut Vec<Rgb>, w: usize, sh: usize, amount: f32, phase: f32) {
+    if amount < 0.4 {
+        return;
+    }
+    scratch.clear();
+    scratch.extend_from_slice(px);
+    for y in 0..sh {
+        let t = y as f32 / sh as f32;
+        let shift = ((t * 9.0 + phase) * std::f32::consts::TAU).sin() * amount * (1.0 - t * 0.4);
+        let off = shift.round() as i32;
+        if off == 0 {
+            continue;
+        }
+        let row = y * w;
+        for x in 0..w {
+            let sx = x as i32 - off;
+            px[row + x] = if sx < 0 || sx >= w as i32 {
+                Rgb::ZERO
+            } else {
+                scratch[row + sx as usize]
+            };
+        }
+    }
+}
+
 /// Sync loss: bands of the picture slip sideways for a few frames. A tube that
 /// lost its horizontal hold tore exactly like this, and it is the loudest thing
 /// this machine can do without leaving the vocabulary of a monitor.
@@ -411,6 +442,23 @@ mod tests {
             .count();
         assert!(moved > 0, "something tore");
         assert!(moved < sh, "but the whole picture did not slide");
+    }
+
+    #[test]
+    fn a_wobble_bends_the_picture_and_settles() {
+        let (w, sh) = (32, 32);
+        let mut px = vec![Rgb::ZERO; w * sh];
+        for y in 0..sh {
+            px[y * w + w / 2] = Rgb::new(1.0, 1.0, 1.0);
+        }
+        let mut scratch = Vec::new();
+        let mut bent = px.clone();
+        wobble(&mut bent, &mut scratch, w, sh, 4.0, 0.0);
+        assert_ne!(bent, px, "the picture did not bend");
+        // And a settled tube is a straight one.
+        let mut straight = px.clone();
+        wobble(&mut straight, &mut scratch, w, sh, 0.0, 0.0);
+        assert_eq!(straight, px);
     }
 
     #[test]

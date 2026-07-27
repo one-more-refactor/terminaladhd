@@ -29,8 +29,9 @@ usage: adhd [--size WxH] [-- <command>...]
 The machine picks the game. Every time you die it spins and picks another,
 shows you where the run placed, and starts the next one. Needs 80x26.
 
-keys: arrows or hjkl steer, x or up rotates, z counter-rotates,
-      space hard drops, c holds, esc leaves the game then quits
+keys: wasd, arrows or hjkl steer; x or up rotates, z counter-rotates,
+      space hard drops, c holds, p pauses, ? shows them all,
+      esc leaves the game then quits
 
   --lean / --rich       force the low-bandwidth or the full renderer.
                         Over SSH lean is the default: it is a fifth of the
@@ -146,6 +147,20 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     dump(&stage, "lean")?;
     stage.quality = terminaladhd::stage::Quality::full();
 
+    // A row coming apart, which is the one thing a still of a working game
+    // almost never catches.
+    {
+        use std::time::Duration;
+        use terminaladhd::games::{Input, Tetris};
+        let mut g = Tetris::with_rng(Rng::from_seed(2));
+        g.debris(6);
+        for _ in 0..5 {
+            g.step(&Input::default(), Duration::from_millis(16));
+        }
+        stage.game(&g, 9200, true, &tick);
+        dump(&stage, "sparks")?;
+    }
+
     // A piece caught between rows and a hard drop's streak still in the air —
     // the two things a still normally cannot show about how it moves.
     {
@@ -205,6 +220,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
                 fade: 1.0,
                 shown: game.score(),
                 record: true,
+                tally: game.tally(),
             },
             9200,
             true,

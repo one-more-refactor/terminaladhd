@@ -21,7 +21,7 @@ use std::time::Duration;
 use crate::games::{Game, Input, Kick, Kind, Pop};
 use crate::rng::Rng;
 use crate::world::layout::Layout;
-use crate::world::Buf;
+use crate::world::{Buf, Sparks};
 
 use handling::Handling;
 use rules::{Board, Piece, BUFFER, COLS, ROWS, VISIBLE};
@@ -142,6 +142,8 @@ pub struct Tetris {
     squash: f32,
     /// The queue still sliding up after a piece was taken off the front.
     queue_slide: f32,
+    /// Debris in the air. Rows that clear come apart rather than vanishing.
+    pub(crate) sparks: Sparks,
     score: u32,
     lines: u32,
     /// Consecutive line-clearing pieces; a clean lock breaks it.
@@ -188,6 +190,7 @@ impl Tetris {
             trail: None,
             squash: 0.0,
             queue_slide: 0.0,
+            sparks: Sparks::new(),
             score: 0,
             lines: 0,
             combo: 0,
@@ -339,6 +342,7 @@ impl Tetris {
         }
         self.squash = (self.squash - dts / SQUASH_SECS).max(0.0);
         self.queue_slide = (self.queue_slide - dts / QUEUE_SLIDE_SECS).max(0.0);
+        self.sparks.step(dts);
 
         // A clear freezes the world for its window, then collapses and reloads.
         if !self.clearing.is_empty() {
@@ -565,6 +569,22 @@ impl Tetris {
 
     fn finish_clear(&mut self) {
         let rows = std::mem::take(&mut self.clearing);
+        // The rows do not vanish, they open outward. A row that disappears was
+        // never there; a row that blows across the well was something you did.
+        for &row in &rows {
+            if row >= BUFFER {
+                let hue = self.board.cells[row][COLS / 2]
+                    .map(|m| m.color())
+                    .unwrap_or_else(|| crate::world::hex(0xFFFFFF));
+                self.sparks.shear(
+                    &mut self.rng,
+                    (row - BUFFER) as f32,
+                    COLS,
+                    18.0 + 6.0 * rows.len() as f32,
+                    hue.lerp(crate::world::hex(0xFFFFFF), 0.55),
+                );
+            }
+        }
         // The board collapses now and the picture catches up over the next
         // hundred milliseconds, which is why the rows that went are kept.
         self.collapsed = rows.clone();
@@ -759,6 +779,27 @@ impl Tetris {
         }
     }
 
+    /// Throw a row's worth of debris, for a still that has to show what a clear
+    /// looks like without waiting for one to happen.
+    pub fn debris(&mut self, row: usize) {
+        let hue = crate::world::hex(0x00F0FF);
+        self.sparks
+            .shear(&mut self.rng, row as f32, COLS, 20.0, hue);
+    }
+
+    /// How close the stack is to the top, `0.0..=1.0`. Nothing on screen says
+    /// this in words; the frame runs hotter and the lights run faster, which is
+    /// a thing you feel a piece or two before you would have counted it.
+    pub fn danger(&self) -> f32 {
+        let cells = self.cells();
+        let top = (0..VISIBLE)
+            .find(|&r| cells[r].iter().any(|c| c.is_some()))
+            .unwrap_or(VISIBLE);
+        // The top quarter of the well is where it starts to matter.
+        let depth = VISIBLE as f32 / 4.0;
+        ((depth - top as f32) / depth).clamp(0.0, 1.0)
+    }
+
     /// How hard the last landing is still being felt, `0.0..=1.0`. The row a
     /// piece came to rest on is drawn compressed by it, so a lock lands rather
     /// than simply appearing.
@@ -840,6 +881,10 @@ impl Game for Tetris {
 
     fn take_kick(&mut self) -> Option<Kick> {
         self.kick.take()
+    }
+
+    fn tally(&self) -> [(&'static str, u32); 2] {
+        [("LINES", self.lines), ("LEVEL", self.level())]
     }
 
     fn pops(&self) -> &[Pop] {
@@ -1198,6 +1243,17 @@ mod motion {
         // Whatever the piece was doing on its way down, the stack is square.
         assert_eq!(g.glide_x, 0.0);
         assert_eq!(g.fall_accum, 0.0);
+    }
+
+    #[test]
+    fn danger_rises_as_the_stack_does() {
+        let mut g = Tetris::with_rng(Rng::from_seed(9));
+        assert_eq!(g.danger(), 0.0, "an empty well is not dangerous");
+        // Fill from the floor up: nothing until the top quarter, then it climbs.
+        for row in (BUFFER..ROWS).rev() {
+            g.board.cells[row][0] = Some(Mino::I);
+        }
+        assert!(g.danger() > 0.9, "a full well is: {}", g.danger());
     }
 
     #[test]

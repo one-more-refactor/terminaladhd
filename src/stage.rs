@@ -57,6 +57,9 @@ pub struct Stage {
     pub progress: Option<f32>,
     /// A full-frame white wash, `0.0..=1.0`. Consumed by the frame that draws.
     pub flash: f32,
+    /// How hard the tube is still bending as it warms back up. The shell drives
+    /// it down from one as the curtain opens.
+    pub warmup: f32,
     /// How far the tube has cut out, `0.0..=1.0`. The shell drives it closed on
     /// its way out of a screen and open on its way into the next.
     pub curtain: f32,
@@ -290,6 +293,7 @@ impl Stage {
             progress: None,
             flash: 0.0,
             curtain: 0.0,
+            warmup: 0.0,
             fringe: 0.0,
             jolt: (0, 0),
             tear: 0.0,
@@ -480,15 +484,20 @@ impl Stage {
         chrome_word(&mut self.buf, word, scale, l.w as f32 * 0.5, mid - 9.0);
 
         let hue = if s.record { c(YELLOW) } else { c(CYAN) };
-        text_center(
-            &mut self.buf,
-            &format!("{:06}", s.shown),
-            l.w as i32 / 2,
-            mid as i32 + 6,
-            2,
-            hue,
-            1.2,
-        );
+        let cx = l.w as i32 / 2;
+        text_center(&mut self.buf, &format!("{:06}", s.shown), cx, mid as i32 + 6, 2, hue, 1.2);
+
+        // The run, in the two numbers the game keeps. Only once the counter has
+        // finished climbing, so there is one thing to read at a time.
+        if s.shown >= 1 || s.tally.iter().any(|&(_, v)| v > 0) {
+            let line = s
+                .tally
+                .iter()
+                .map(|(name, v)| format!("{name} {v}"))
+                .collect::<Vec<_>>()
+                .join("   ");
+            text_center(&mut self.buf, &line, cx, mid as i32 + 20, 1, c(STEEL), 0.0);
+        }
         self.close(s.shown, best, self.kind.name(), blink, tick);
     }
 
@@ -536,7 +545,7 @@ impl Stage {
         );
 
         let rows: [(&str, &str); 7] = [
-            ("ARROWS  HJKL", "MOVE AND STEER"),
+            ("WASD  ARROWS  HJKL", "MOVE AND STEER"),
             ("X  UP", "ROTATE"),
             ("Z", "ROTATE BACK"),
             ("SPACE", "HARD DROP"),
@@ -750,6 +759,15 @@ impl Stage {
             std::mem::take(&mut self.tear).max(beat.tear),
             self.torn,
         );
+        // A tube coming back does not simply appear: it bends and settles.
+        crt::wobble(
+            &mut self.px,
+            &mut self.scratch,
+            w,
+            sh,
+            self.warmup * 7.0,
+            self.hum * 6.0,
+        );
         crt::collapse(&mut self.px, &mut self.scratch, w, sh, self.curtain);
         resolve_d(&self.px, w, sh, self.quality.tol, true, &mut self.cells);
     }
@@ -774,6 +792,11 @@ pub struct Settle {
     /// appearing at it.
     pub shown: u32,
     pub record: bool,
+    /// The run in two numbers, whatever the game calls them. This is where they
+    /// belong — they are what you read after a run, not what you play with, and
+    /// keeping them out of the column is most of what makes the game screen
+    /// quiet enough to play on.
+    pub tally: [(&'static str, u32); 2],
 }
 
 /// `1ST`, `2ND`, `3RD`, then `4TH` upward — the arcade board's own ordinals.

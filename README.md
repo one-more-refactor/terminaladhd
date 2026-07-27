@@ -107,8 +107,8 @@ repaint or corrupt the screen.
 
 | | |
 |---|---|
-| `←` `→` or `h` `l` | move / steer |
-| `↑` `↓` or `k` `j` | steer; `↑` also rotates |
+| `a` `d`, `←` `→` or `h` `l` | move / steer |
+| `w` `s`, `↑` `↓` or `k` `j` | steer; up also rotates |
 | `x` / `z` | rotate clockwise / counter-clockwise |
 | `space` | hard drop |
 | `c` | hold |

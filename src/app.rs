@@ -291,6 +291,9 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
 
         let closing = machine.cut(STEP.as_secs_f32());
         stage.curtain = machine.curtain;
+        // On the way back in the picture is still bending; on the way out it is
+        // already gone, so there is nothing to bend.
+        stage.warmup = if closing { 0.0 } else { machine.curtain };
 
         let now = Instant::now();
         accumulator += (now - last).min(MAX_CATCHUP);
@@ -439,11 +442,11 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             Mode::Paused => stage.paused(game.as_ref(), best, blink, &tick),
             Mode::Help { .. } => stage.help(kind, best, &tick),
             Mode::Over { age, score, rank } => {
-                let record = *rank == Some(0);
                 let settle = Settle {
                     fade: (age / SINK_TIME).clamp(0.0, 1.0),
                     shown: counted(*score, *age),
-                    record,
+                    record: *rank == Some(0),
+                    tally: game.tally(),
                 };
                 stage.over(game.as_ref(), &settle, best, blink, &tick);
             }

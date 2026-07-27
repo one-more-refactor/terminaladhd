@@ -123,6 +123,12 @@ pub trait Game {
         Input::default()
     }
 
+    /// The two numbers this run is remembered by, for the screen that is read
+    /// after it rather than played on.
+    fn tally(&self) -> [(&'static str, u32); 2] {
+        [("", 0), ("", 0)]
+    }
+
     /// Paint the arena and the game's own columns. The ground, the warp field
     /// and the chrome are the shell's, and are already on the buffer.
     fn paint(&self, b: &mut Buf, l: &Layout);
@@ -178,8 +184,8 @@ impl Kind {
     /// The one line of controls the ticker carries while this game is up.
     pub fn hint(self) -> &'static str {
         match self {
-            Kind::Tetris => "ARROWS MOVE - Z X ROTATE - SPACE DROPS - C HOLDS",
-            Kind::Snake => "STEER WITH THE ARROWS - THE WALLS BITE",
+            Kind::Tetris => "WASD OR ARROWS - Z X ROTATE - SPACE DROPS - C HOLDS",
+            Kind::Snake => "STEER WITH WASD OR THE ARROWS - THE WALLS BITE",
         }
     }
 

@@ -188,6 +188,30 @@ It is brutal and still human, because a grounded piece keeps its full
 have to think, not how long you have to place. The curve runs 355 ms at the
 start, 190 at a minute, 135 at ninety seconds, and settles.
 
+## Things come apart
+
+When something is destroyed on this machine it comes apart rather than
+disappearing. A row that vanishes was never there; a row that blows out across
+the well was something you did.
+
+`world::spark` is a small particle system both games emit into. Sparks live in
+*arena cells* — the coordinates the games already think in — so a game emits at
+the cell where a thing happened and never has to know how big a cell currently
+is on screen. They are drawn emissive only, so debris never occludes the game
+under it and always blooms, for the same reason the warp field is.
+
+Three emitters, because three things happen:
+
+- **`shear`** — a row opening outward, hardest at the edges, so a clear reads as
+  the line being forced apart rather than as confetti.
+- **`burst`** — a cell blown up: an apple taken, a segment of a dead snake.
+- **`glimmer`** — light rather than matter. It rises and does not fall, which is
+  what a bonus paying out looks like.
+
+There is no pool and no fixed buffer. The cap is a count and the oldest go
+first, which is both simpler than a pool and the behaviour you want: the sparks
+that matter are the ones that just left.
+
 ## Nothing on screen sits still
 
 The screen is deliberately sparse, and the price of sparse is that whatever is
@@ -208,12 +232,24 @@ left had better be alive. Every element that survived the cut moves:
   rope that only moves when the snake does is a rope nobody looks at twice.
 - **The score lifts when it moves.** It is the number the whole machine is
   about; one that only ever sits there is one nobody watches change.
+- **A high stack is felt before it is counted.** Nothing says "you are about to
+  lose" in words. The frame pulls off its own colour toward the hazard, pulses,
+  and runs its lights faster — a piece or two before you would have noticed the
+  height yourself.
+- **The tube bends as it comes back.** Every screen change opens on a picture
+  still wobbling and settling, the way a real one did after a degauss.
 - **The marquee breathes.** A wordmark perfectly still on an otherwise moving
   screen is the single thing that reads as a screenshot.
 
 What went, to pay for it: the hairline under every column label, which was
-drawing furniture, and snake's apple count, which was the score by another name.
-A column is better for holding one number the player is actually playing for.
+drawing furniture; snake's apple count, which was the score by another name; and
+tetris's LINES and LEVEL, which moved to the game-over screen. They are what you
+read *after* a run rather than what you play with, and keeping them out of the
+column is most of what makes the game screen quiet enough to play on.
+
+Three ways to move, because the machine has no idea whose hands are on it:
+arrows, vim, and the left-hand grip everyone who has ever played anything
+already has.
 
 ## The loud moments
 
