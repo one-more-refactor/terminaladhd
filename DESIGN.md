@@ -57,6 +57,24 @@ death it punches into hyperspace for a fifth of a second and falls back. Play
 well and the whole screen goes faster. No game knows it exists — games bank an
 impact, the shell spends it.
 
+## The games claim the width
+
+Snake's field used to be a fixed 26×14 wherever it was played, which on a wide
+terminal left it sitting in the middle of a lot of black. It is fourteen rows
+because that is what the height affords, and now as many columns as the width
+will carry — solved by taking the mino size the height forces and dividing the
+usable width by it. On a 270-column terminal that is a field roughly four times
+the area it used to be.
+
+The arena is fixed when a game is *spawned*, not recomputed from the terminal
+every frame, and the layout takes it from the running game rather than from the
+game's kind. That is what makes a resize safe: it changes how big a cell is
+drawn and never how many there are, so a snake can never find itself outside its
+own walls.
+
+Tetris cannot do this, and should not. Ten by twenty with square minos is twice
+as tall as it is wide, and that is the game.
+
 ## Everything reflows from (width, height)
 
 `world::layout` is the only place a screen coordinate is allowed to come from. A
@@ -479,12 +497,11 @@ job; the question was only ever how much of the frame it decides has changed.
   text, and text that wobbles is not authenticity, it is a bug.
 - **Letting the player replay the same game.** Tempting, and rejected: the
   moment you can choose, the machine is a menu with extra steps.
-- **An adaptive snake arena.** It should have one — snake does not care whether
-  it is 20×20 or 12×12, and on a 60-column phone the fixed size eats the flank
-  its readings need. What stopped it is that a resize would then change the
-  arena under a running snake whose body is already outside the new one. It
-  wants the layout to follow the game's field rather than the game's kind, and
-  that is a change worth making carefully rather than at the end of a session.
+- **A wide tetris well.** Ten by twenty with square minos is twice as tall as
+  it is wide, and that *is* the game — stretching it to fill a wide terminal
+  would make it a different one. A tetris cabinet solved this by standing its
+  monitor on end, and there is no equivalent of that here. So the well is as
+  large as the height allows and the flanks stay black.
 
 ## Adding a game
 

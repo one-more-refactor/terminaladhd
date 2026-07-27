@@ -26,8 +26,11 @@ use super::{Game, Input, Kick, Kind, Pop};
 
 /// The arena, taken from the same place the layout takes it so the logic and
 /// the cut hole can never disagree.
-pub const COLS: i32 = Kind::Snake.field().0 as i32;
-pub const ROWS: i32 = Kind::Snake.field().1 as i32;
+/// The arena the tests and the autopilot reason about when they are not
+/// looking at a live game. A running snake carries its own, sized to the frame
+/// it was spawned on.
+pub const COLS: i32 = 26;
+pub const ROWS: i32 = 14;
 
 /// Seconds per cell at each speed tier, and the points an apple pays there.
 /// Discrete rather than a smooth curve: a tier the player can feel arriving is
@@ -122,6 +125,10 @@ pub struct Apple {
 }
 
 pub struct Snake {
+    /// The arena, in cells. Fixed for the life of the run — a resize changes
+    /// how big a cell is drawn, never how many there are.
+    cols: i32,
+    rows: i32,
     /// Head first, tail last.
     body: VecDeque<(i32, i32)>,
     /// Where those cells were before the last move. Render-only: collision,
@@ -166,14 +173,21 @@ impl Snake {
         Self::with_rng(Rng::new())
     }
 
-    pub fn with_rng(mut rng: Rng) -> Self {
+    pub fn with_rng(rng: Rng) -> Self {
+        Self::with_field(rng, COLS, ROWS)
+    }
+
+    pub fn with_field(mut rng: Rng, cols: i32, rows: i32) -> Self {
+        let (cols, rows) = (cols.max(8), rows.max(8));
         // Facing right out of the middle: the same runway either side, and no
         // wall to meet before the player has taken hold.
-        let cy = ROWS / 2;
-        let x0 = COLS / 2;
+        let cy = rows / 2;
+        let x0 = cols / 2;
         let body: VecDeque<(i32, i32)> = (0..START_LEN as i32).map(|i| (x0 - i, cy)).collect();
-        let apple = place(&mut rng, &body, false);
+        let apple = place(&mut rng, &body, false, cols, rows);
         Snake {
+            cols,
+            rows,
             prev: body.clone(),
             body,
             dir: Dir::Right,
@@ -263,6 +277,15 @@ impl Snake {
         &self.body
     }
 
+    /// The arena this run is on, in cells.
+    pub fn cols(&self) -> i32 {
+        self.cols
+    }
+
+    pub fn rows(&self) -> i32 {
+        self.rows
+    }
+
     pub fn head(&self) -> (i32, i32) {
         *self.body.front().unwrap_or(&(0, 0))
     }
@@ -340,7 +363,7 @@ impl Snake {
         let (hx, hy) = self.head();
         let next = (hx + dx, hy + dy);
 
-        if next.0 < 0 || next.1 < 0 || next.0 >= COLS || next.1 >= ROWS {
+        if next.0 < 0 || next.1 < 0 || next.0 >= self.cols || next.1 >= self.rows {
             self.die();
             return;
         }
@@ -426,7 +449,7 @@ impl Snake {
         // The next apple is golden on the count, not on a die roll: a reward
         // you can see coming is one you will change your line to reach.
         let next_gold = (self.eaten + 1).is_multiple_of(GOLD_EVERY);
-        self.apple = place(&mut self.rng, &self.body, next_gold);
+        self.apple = place(&mut self.rng, &self.body, next_gold, self.cols, self.rows);
     }
 
     fn die(&mut self) {
@@ -457,13 +480,19 @@ impl Snake {
 /// A free cell, chosen uniformly. Falls back to any in-bounds cell if the snake
 /// has filled the arena — at which point the run is won and about to end
 /// anyway, and a panic here would be the worst possible way to say so.
-fn place(rng: &mut Rng, body: &VecDeque<(i32, i32)>, gold: bool) -> Apple {
-    let free: Vec<(i32, i32)> = (0..ROWS)
-        .flat_map(|y| (0..COLS).map(move |x| (x, y)))
+fn place(
+    rng: &mut Rng,
+    body: &VecDeque<(i32, i32)>,
+    gold: bool,
+    cols: i32,
+    rows: i32,
+) -> Apple {
+    let free: Vec<(i32, i32)> = (0..rows)
+        .flat_map(|y| (0..cols).map(move |x| (x, y)))
         .filter(|c| !body.contains(c))
         .collect();
     let at = if free.is_empty() {
-        (COLS / 2, ROWS / 2)
+        (cols / 2, rows / 2)
     } else {
         free[rng.range(free.len() as u32) as usize]
     };
@@ -483,6 +512,10 @@ impl Default for Snake {
 impl Game for Snake {
     fn kind(&self) -> Kind {
         Kind::Snake
+    }
+
+    fn field(&self) -> (usize, usize) {
+        (self.cols as usize, self.rows as usize)
     }
 
     fn step(&mut self, input: &Input, dt: Duration) {
@@ -520,7 +553,7 @@ impl Game for Snake {
         if let Some(ttl) = &mut self.apple.ttl {
             *ttl -= dts;
             if *ttl <= 0.0 {
-                self.apple = place(&mut self.rng, &self.body, false);
+                self.apple = place(&mut self.rng, &self.body, false, self.cols, self.rows);
             }
         }
 
@@ -600,8 +633,8 @@ impl Game for Snake {
         let safe = want.into_iter().find(|d| {
             let (ox, oy) = d.delta();
             let next = (hx + ox, hy + oy);
-            (0..COLS).contains(&next.0)
-                && (0..ROWS).contains(&next.1)
+            (0..self.cols).contains(&next.0)
+                && (0..self.rows).contains(&next.1)
                 && !self.body.contains(&next)
         });
         let mut input = Input::default();
@@ -665,10 +698,18 @@ mod tests {
     }
 
     #[test]
-    fn the_arena_matches_the_hole_the_world_cuts() {
-        // The logic and the layout read the same source; this fails the moment
-        // one of them stops.
-        assert_eq!((COLS as usize, ROWS as usize), Kind::Snake.field());
+    fn the_field_follows_the_frame_and_stays_sane() {
+        // Wider terminal, wider field — that is the whole point of it being
+        // chosen at spawn. And never so narrow or so wide that it stops being
+        // a snake arena.
+        let narrow = Kind::Snake.field(80, 40);
+        let wide = Kind::Snake.field(300, 40);
+        assert!(wide.0 > narrow.0, "{narrow:?} vs {wide:?}");
+        for (w, h) in [(60, 24), (80, 25), (120, 34), (200, 50), (400, 100)] {
+            let (cols, rows) = Kind::Snake.field(w, h);
+            assert!((18..=48).contains(&cols), "{w}x{h} gave {cols} columns");
+            assert!(cols > rows, "{w}x{h}: {cols}x{rows} is not a snake field");
+        }
     }
 
     #[test]
@@ -863,7 +904,7 @@ mod tests {
     fn the_apple_never_lands_under_the_snake() {
         let mut g = Snake::with_rng(Rng::from_seed(9));
         for _ in 0..200 {
-            let a = place(&mut g.rng, &g.body, false);
+            let a = place(&mut g.rng, &g.body, false, g.cols, g.rows);
             assert!(!g.body.contains(&a.at));
         }
     }

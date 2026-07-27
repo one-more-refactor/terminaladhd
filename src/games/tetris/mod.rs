@@ -846,6 +846,10 @@ impl Game for Tetris {
         Kind::Tetris
     }
 
+    fn field(&self) -> (usize, usize) {
+        (COLS, VISIBLE)
+    }
+
     fn step(&mut self, input: &Input, dt: Duration) {
         self.advance(input, dt);
     }

@@ -73,6 +73,10 @@ pub trait Game {
     /// game it is only holding as a `dyn Game` — the attract demo, above all.
     fn kind(&self) -> Kind;
 
+    /// The arena this run is being played on, in minos. Fixed when the game was
+    /// spawned, so a resize never moves the walls.
+    fn field(&self) -> (usize, usize);
+
     fn step(&mut self, input: &Input, dt: Duration);
     fn is_over(&self) -> bool;
     fn score(&self) -> u32;
@@ -154,16 +158,34 @@ impl Kind {
         }
     }
 
-    /// The arena to cut, in minos. The layout picks a scale that fits it.
-    pub const fn field(self) -> (usize, usize) {
+    /// The arena to cut, in minos, for a given frame.
+    ///
+    /// Tetris is 10×20 wherever it is played. A mino is square in sub-pixels,
+    /// so the well is twice as tall as it is wide — that is the game, and
+    /// stretching it to fill a wide terminal would make it a different one.
+    /// A tetris cabinet used a monitor stood on its end for exactly this
+    /// reason, and there is no equivalent of that here.
+    ///
+    /// Snake has no such shape. It is fourteen rows because that is what the
+    /// height affords, and as many columns as the width will carry — so on a
+    /// wide terminal the field claims the screen rather than sitting in the
+    /// middle of it.
+    pub fn field(self, w: usize, h: usize) -> (usize, usize) {
         match self {
             Kind::Tetris => (10, 20),
-            // Wide, not square. A mino is square in sub-pixels, so 26x14 lands
-            // as a field about twice as wide as it is tall — which is the shape
-            // snake has always been played on, and the shape a terminal is.
-            // A square arena leaves the player equidistant from everything and
-            // the game loses its rhythm of long runs into tight corners.
-            Kind::Snake => (26, 14),
+            Kind::Snake => {
+                const ROWS: usize = 14;
+                // The same mino the layout will pick, chosen from the height
+                // alone, so the column count can be solved for the width.
+                let body = h.saturating_sub(4);
+                let px = [10usize, 8, 6, 5, 4, 3, 2]
+                    .into_iter()
+                    .find(|&p| ROWS * p / 2 <= body)
+                    .unwrap_or(2);
+                let usable = w.saturating_sub(2 * (18 + 2));
+                let cols = (usable / px).clamp(18, 48);
+                (cols, ROWS)
+            }
         }
     }
 
@@ -194,16 +216,21 @@ impl Kind {
         }
     }
 
-    pub fn spawn(self, rng: Rng) -> Box<dyn Game> {
+    /// Spawn a game sized for this frame. The field it gets is fixed for the
+    /// life of the run: a resize changes how big a cell is drawn, never how
+    /// many there are, or a snake would find itself outside its own arena.
+    pub fn spawn(self, rng: Rng, w: usize, h: usize) -> Box<dyn Game> {
+        let (cols, rows) = self.field(w, h);
         match self {
             Kind::Tetris => Box::new(Tetris::with_rng(rng)),
-            Kind::Snake => Box::new(Snake::with_rng(rng)),
+            Kind::Snake => Box::new(Snake::with_field(rng, cols as i32, rows as i32)),
         }
     }
 
-    /// The layout this game wants for a terminal size.
+    /// The layout a fresh game of this kind wants for a terminal size. A game
+    /// already running has its own field; use [`Game::field`].
     pub fn layout(self, w: usize, h: usize) -> Layout {
-        let (cols, rows) = self.field();
+        let (cols, rows) = self.field(w, h);
         Layout::for_field(w, h, cols, rows)
     }
 

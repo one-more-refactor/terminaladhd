@@ -303,12 +303,12 @@ const HUM_STRENGTH: f32 = 0.055;
 const HUM_SECS: f32 = 7.5;
 
 impl Stage {
-    pub fn new(kind: Kind, w: usize, h: usize) -> Self {
+    pub fn new(kind: Kind, field: (usize, usize), w: usize, h: usize) -> Self {
         Stage {
             w,
             h,
             kind,
-            layout: kind.layout(w, h),
+            layout: Layout::for_field(w, h, field.0, field.1),
             warp: Warp::new(w, 2 * h, seed(w, h)),
             progress: None,
             flash: 0.0,
@@ -337,12 +337,12 @@ impl Stage {
     /// Re-cut the screen for a different game. Cheap enough to call on every
     /// spin, and the only way the arena is ever allowed to change shape. The
     /// warp field survives it, so the background never stutters at a cut.
-    pub fn retarget(&mut self, kind: Kind) {
-        if kind == self.kind {
-            return;
-        }
+    /// The field comes from the game rather than from its kind: a run keeps the
+    /// arena it was spawned with, so a resize can never move the walls of a
+    /// snake that is already inside them.
+    pub fn retarget(&mut self, kind: Kind, field: (usize, usize)) {
         self.kind = kind;
-        self.layout = kind.layout(self.w, self.h);
+        self.layout = Layout::for_field(self.w, self.h, field.0, field.1);
     }
 
     /// Advance the background. Separate from drawing because the field has to
@@ -389,7 +389,7 @@ impl Stage {
         // The demo gets its own arena — it may not be the game the stage is cut
         // for — and no side columns: a NEXT queue nobody can use is clutter
         // around the marquee.
-        let mut bare = demo.kind().layout(self.w, self.h);
+        let mut bare = Layout::for_field(self.w, self.h, demo.field().0, demo.field().1);
         bare.left_col = None;
         bare.right_col = None;
         // Behind the marquee at a fifth brightness: legible as motion, never
@@ -441,7 +441,7 @@ impl Stage {
     /// something.
     pub fn coin(&mut self, demo: &dyn Game, age: f32, tick: &Tick) {
         self.open(0.4);
-        let mut bare = demo.kind().layout(self.w, self.h);
+        let mut bare = Layout::for_field(self.w, self.h, demo.field().0, demo.field().1);
         bare.left_col = None;
         bare.right_col = None;
         demo.paint(&mut self.buf, &bare);
@@ -930,7 +930,7 @@ mod tests {
 
     #[test]
     fn a_reaction_plays_once_and_stops() {
-        let mut s = Stage::new(Kind::Tetris, 80, 26);
+        let mut s = Stage::new(Kind::Tetris, (10, 20), 80, 26);
         let beats = play(&mut s, strobe::CLEAR);
         assert_eq!(beats.len(), strobe::CLEAR.len() + 2);
         for (got, want) in beats.iter().zip(strobe::CLEAR) {
@@ -943,7 +943,7 @@ mod tests {
 
     #[test]
     fn a_louder_reaction_displaces_a_quieter_one() {
-        let mut s = Stage::new(Kind::Tetris, 80, 26);
+        let mut s = Stage::new(Kind::Tetris, (10, 20), 80, 26);
         s.fire(strobe::CLEAR, c(WHITE));
         s.beat();
         s.fire(strobe::HUGE, c(WHITE));
@@ -954,7 +954,7 @@ mod tests {
 
     #[test]
     fn a_quieter_reaction_does_not_cut_a_louder_one_short() {
-        let mut s = Stage::new(Kind::Tetris, 80, 26);
+        let mut s = Stage::new(Kind::Tetris, (10, 20), 80, 26);
         s.fire(strobe::HUGE, c(WHITE));
         s.beat();
         s.fire(strobe::CLEAR, c(WHITE));
@@ -984,7 +984,7 @@ mod tests {
 
     #[test]
     fn a_metered_link_gets_a_shorter_reaction_that_still_lets_go() {
-        let mut s = Stage::new(Kind::Tetris, 80, 26);
+        let mut s = Stage::new(Kind::Tetris, (10, 20), 80, 26);
         s.quality = Quality::lean();
         s.fire(strobe::HUGE, c(WHITE));
         let played: Vec<Beat> = (0..strobe::HUGE.len() + 2).map(|_| s.beat()).collect();

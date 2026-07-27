@@ -218,17 +218,17 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
     let mut scores = Table::load();
     let mut kind = pick(&mut rng, None);
 
-    let mut stage = Stage::new(kind, w0, h0);
+    let mut stage = Stage::new(kind, kind.field(w0, h0), w0, h0);
     stage.quality = quality;
     let frame_time = Duration::from_micros(1_000_000 / quality.fps.clamp(10, 120) as u64);
     let mut prev = vec![Default::default(); stage.w * stage.h];
     let mut presenter = term::Presenter::new(stage.quality.tol);
 
-    let mut game = kind.spawn(Rng::new());
+    let mut game = kind.spawn(Rng::new(), w0, h0);
     // The attract screen shows a game playing itself, and it is never the one
     // you are about to be given — the demo is a trailer, not a spoiler.
     let mut demo_kind = pick(&mut rng, Some(kind));
-    let mut demo = demo_kind.spawn(Rng::new());
+    let mut demo = demo_kind.spawn(Rng::new(), w0, h0);
     let mut machine = Machine::new(Mode::Attract {
         since: Instant::now(),
     });
@@ -254,7 +254,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             term_size = (cw, ch);
             if cw >= term::MIN_SIZE.0 && ch >= term::MIN_SIZE.1 && (cw != stage.w || ch != stage.h)
             {
-                stage = Stage::new(kind, cw, ch);
+                stage = Stage::new(kind, game.field(), cw, ch);
                 stage.quality = quality;
                 prev = vec![Default::default(); stage.w * stage.h];
                 term::clear()?;
@@ -418,7 +418,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
         if matches!(machine.mode, Mode::Attract { .. }) {
             if demo.is_over() {
                 demo_kind = pick(&mut rng, Some(demo_kind));
-                demo = demo_kind.spawn(Rng::new());
+                demo = demo_kind.spawn(Rng::new(), stage.w, stage.h);
             }
             let input = demo.autopilot();
             demo.step(&input, STEP);
@@ -544,8 +544,8 @@ fn advance(s: Sim) {
             if *age >= travel + SPIN_HOLD {
                 let landed = *reel.last().unwrap_or(&Kind::Tetris);
                 *s.kind = landed;
-                s.stage.retarget(landed);
-                *s.game = landed.spawn(Rng::new());
+                s.stage.retarget(landed, s.game.field());
+                *s.game = landed.spawn(Rng::new(), s.stage.w, s.stage.h);
                 *s.played = Duration::ZERO;
                 s.machine.go(Mode::Play);
             }

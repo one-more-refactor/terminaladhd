@@ -110,7 +110,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
         left: "COMPILING TERMINALADHD V0.1.0".into(),
         right: "1:07".into(),
     };
-    let mut stage = Stage::new(Kind::Tetris, w, h);
+    let mut stage = Stage::new(Kind::Tetris, Kind::Tetris.field(w, h), w, h);
     stage.progress = Some(0.62);
     let dump = |stage: &Stage, name: &str| -> Result<()> {
         let (px, pw, sh) = stage.sub_pixels();
@@ -123,7 +123,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
         stage.animate(0.016, 0.2);
     }
 
-    let demo = play(Kind::Snake, 0);
+    let demo = play(Kind::Snake, 0, w, h);
     stage.attract(demo.as_ref(), 9200, 0.0, &tick);
     dump(&stage, "attract")?;
 
@@ -141,7 +141,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
 
     // Mid-cut: the raster half collapsed, which is what every screen change
     // passes through and the thing a still cannot otherwise show.
-    let mid = play(Kind::Tetris, 400);
+    let mid = play(Kind::Tetris, 400, w, h);
     for (name, t) in [("cut-early", 0.30f32), ("cut-late", 0.72)] {
         stage.curtain = t;
         stage.game(mid.as_ref(), &tick);
@@ -215,10 +215,10 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     dump(&stage, "hit")?;
 
     for kind in ALL {
-        stage.retarget(kind);
+        stage.retarget(kind, kind.field(w, h));
         // Stopped a couple of frames after a score lands, so the still shows a
         // marker in the air rather than a board at rest.
-        let game = play(kind, 900);
+        let game = play(kind, 900, w, h);
 
         stage.game(game.as_ref(), &tick);
         dump(&stage, kind.slug())?;
@@ -255,11 +255,16 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
 /// Play a game headlessly on its own autopilot — the same brain the attract
 /// screen uses, so a still shows exactly what a player would see rather than
 /// something a test harness arranged.
-fn play(kind: terminaladhd::games::Kind, steps: u32) -> Box<dyn terminaladhd::games::Game> {
+fn play(
+    kind: terminaladhd::games::Kind,
+    steps: u32,
+    w: usize,
+    h: usize,
+) -> Box<dyn terminaladhd::games::Game> {
     use std::time::Duration;
     use terminaladhd::rng::Rng;
 
-    let mut game = kind.spawn(Rng::from_seed(7));
+    let mut game = kind.spawn(Rng::from_seed(7), w, h);
     for i in 0..steps {
         if game.is_over() {
             break;
@@ -301,16 +306,16 @@ fn bench(w: usize, h: usize) -> Result<()> {
     };
 
     let measure = |kind: Kind, q: Quality| -> (usize, f64, f64) {
-        let mut stage = Stage::new(kind, w, h);
+        let mut stage = Stage::new(kind, kind.field(w, h), w, h);
         stage.quality = q;
-        let mut game = kind.spawn(terminaladhd::rng::Rng::from_seed(7));
+        let mut game = kind.spawn(terminaladhd::rng::Rng::from_seed(7), w, h);
         let mut prev: Vec<Cell> = vec![Default::default(); w * h];
         let mut out: Vec<u8> = Vec::new();
         let mut total = 0usize;
         let started = Instant::now();
         for _ in 0..FRAMES {
             if game.is_over() {
-                game = kind.spawn(terminaladhd::rng::Rng::from_seed(7));
+                game = kind.spawn(terminaladhd::rng::Rng::from_seed(7), w, h);
             }
             let input = game.autopilot();
             game.step(&input, Duration::from_millis(16));
