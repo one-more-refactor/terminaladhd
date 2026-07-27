@@ -102,6 +102,11 @@ pub struct Trail {
 const COLLAPSE_SECS: f32 = 0.11;
 const TRAIL_SECS: f32 = 0.16;
 
+/// How long a piece stays compressed after it lands, and how long the queue
+/// takes to slide up after one is taken off the front.
+const SQUASH_SECS: f32 = 0.10;
+const QUEUE_SLIDE_SECS: f32 = 0.09;
+
 /// How long a praise banner stays up. Long enough to read mid-drop, short
 /// enough that it is gone before the next lock wants the same space.
 const PRAISE_SECS: f32 = 1.4;
@@ -132,6 +137,11 @@ pub struct Tetris {
     collapsed: Vec<usize>,
     /// The streak a hard drop left behind it.
     trail: Option<Trail>,
+    /// The landing still being absorbed: `1.0` the moment a piece locks,
+    /// decaying to nothing. The row it landed on is squashed by it.
+    squash: f32,
+    /// The queue still sliding up after a piece was taken off the front.
+    queue_slide: f32,
     score: u32,
     lines: u32,
     /// Consecutive line-clearing pieces; a clean lock breaks it.
@@ -176,6 +186,8 @@ impl Tetris {
             collapse: 0.0,
             collapsed: Vec::new(),
             trail: None,
+            squash: 0.0,
+            queue_slide: 0.0,
             score: 0,
             lines: 0,
             combo: 0,
@@ -250,6 +262,9 @@ impl Tetris {
     /// Bring on the head of the queue; false means the well is full.
     fn spawn(&mut self) -> bool {
         let kind = self.queue.remove(0);
+        // The queue starts a slot low and slides up into the gap, so the
+        // preview reads as a conveyor rather than as a list being rewritten.
+        self.queue_slide = 1.0;
         self.refill();
         self.place(kind)
     }
@@ -322,6 +337,8 @@ impl Tetris {
                 self.trail = None;
             }
         }
+        self.squash = (self.squash - dts / SQUASH_SECS).max(0.0);
+        self.queue_slide = (self.queue_slide - dts / QUEUE_SLIDE_SECS).max(0.0);
 
         // A clear freezes the world for its window, then collapses and reloads.
         if !self.clearing.is_empty() {
@@ -478,6 +495,7 @@ impl Tetris {
     fn lock(&mut self) {
         self.glide_x = 0.0;
         self.fall_accum = 0.0;
+        self.squash = 1.0;
         let spin = rules::classify(&self.board, &self.piece, self.spun);
         let kind = self.piece.kind;
         let cells = self.piece.cells();
@@ -739,6 +757,18 @@ impl Tetris {
         } else {
             (self.glide_x, self.fall_accum.clamp(0.0, 1.0))
         }
+    }
+
+    /// How hard the last landing is still being felt, `0.0..=1.0`. The row a
+    /// piece came to rest on is drawn compressed by it, so a lock lands rather
+    /// than simply appearing.
+    pub fn squash(&self) -> f32 {
+        self.squash
+    }
+
+    /// How far the queue still has to slide after a piece came off the front.
+    pub fn queue_slide(&self) -> f32 {
+        self.queue_slide
     }
 
     /// The stack falling into a cleared gap: how far it still has to go, and

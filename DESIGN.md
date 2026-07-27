@@ -188,6 +188,33 @@ It is brutal and still human, because a grounded piece keeps its full
 have to think, not how long you have to place. The curve runs 355 ms at the
 start, 190 at a minute, 135 at ninety seconds, and settles.
 
+## Nothing on screen sits still
+
+The screen is deliberately sparse, and the price of sparse is that whatever is
+left had better be alive. Every element that survived the cut moves:
+
+- **The arena frame is a marquee.** Four lights with long tails run its
+  perimeter, faster the better the player is doing — the same thing the warp
+  field says, said again where the eye already is. It was the one element that
+  would otherwise never have moved, and a bright dot travelling a border at this
+  resolution is a flicker, so they are comets rather than bulbs.
+- **A lock is absorbed.** The block a piece comes to rest on flattens for a
+  tenth of a second and springs back. Only the top of each column does it, or
+  the whole well would breathe.
+- **The queue is a conveyor.** Take a piece off the front and the rest slide up
+  into the gap while the new one fades in at the bottom, rather than the whole
+  list being rewritten in a frame.
+- **The snake pulses** head to tail. It is the one thing always on screen, and a
+  rope that only moves when the snake does is a rope nobody looks at twice.
+- **The score lifts when it moves.** It is the number the whole machine is
+  about; one that only ever sits there is one nobody watches change.
+- **The marquee breathes.** A wordmark perfectly still on an otherwise moving
+  screen is the single thing that reads as a screenshot.
+
+What went, to pay for it: the hairline under every column label, which was
+drawing furniture, and snake's apple count, which was the score by another name.
+A column is better for holding one number the player is actually playing for.
+
 ## The loud moments
 
 A reaction is written as data — a list of beats, one per render frame — rather

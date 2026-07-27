@@ -143,8 +143,12 @@ fn body(b: &mut Buf, l: &Layout, g: &Snake, shake: i32) {
         let igniting = death > 0.0 && death >= burn;
         let col = if igniting { c(WHITE) } else { body_color(t) };
         // The head carries the light; the tail is nearly matte, which keeps a
-        // long snake from blooming into one pale rope.
-        let halo = if i == 0 { 0.9 } else { 0.35 * (1.0 - t) };
+        // long snake from blooming into one pale rope. On top of that a pulse
+        // runs head to tail — the body is the one thing on screen that is
+        // always there, and a rope that only moves when the snake does is a
+        // rope nobody looks at twice.
+        let wave = ((g.elapsed.as_secs_f32() * 5.0 - t * 6.0).sin() * 0.5 + 0.5).powi(3);
+        let halo = if i == 0 { 0.9 } else { 0.30 * (1.0 - t) + 0.5 * wave };
         pill(b, x, y, p, col, if igniting { 1.5 } else { halo });
         if i == 0 && !igniting {
             eyes(b, x, y, p, g.dir());
@@ -163,20 +167,15 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Snake) {
         l,
         x,
         2 * cy as i32,
-        &[
-            Stat {
-                label: "APPLES",
-                short: "AP",
-                value: g.eaten(),
-                hue: c(GREEN),
-            },
-            Stat {
-                label: "MULT",
-                short: "MU",
-                value: g.mult(),
-                hue: c(MAGENTA),
-            },
-        ],
+        // Only the multiplier. The apple count was the score by another name,
+        // and the column is better for having one number in it that the player
+        // is actually playing for.
+        &[Stat {
+            label: "MULT",
+            short: "MU",
+            value: g.mult(),
+            hue: c(MAGENTA),
+        }],
     );
 
     let left = g.streak_left();
@@ -210,7 +209,8 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Snake) {
     } else {
         (0.8 - g.since_eat() * 9.0).max(0.0)
     };
-    frame(b, l, shake, Kind::Snake.hue(), ignite);
+    let chase = t * (0.45 + 1.6 * g.heat());
+    frame(b, l, shake, Kind::Snake.hue(), ignite, chase);
     if g.death() == 0.0 {
         wall_warning(b, l, g, shake);
     }

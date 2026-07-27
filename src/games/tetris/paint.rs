@@ -52,14 +52,32 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Tetris) {
     let x = nx as i32;
     let p = l.mino_px as i32;
 
-    let mut y = heading(b, l, x, 2 * ny as i32, "NEXT", "NXT");
+    let top = heading(b, l, x, 2 * ny as i32, "NEXT", "NXT");
     let deep = l.next_deep.min(g.next().len());
+    let pitch = p + 2;
+    // Sliding up into the gap the last piece left behind it.
+    let slide = (g.queue_slide() * pitch as f32) as i32;
+    let mut y = top + slide;
     for (i, &m) in g.next().iter().take(deep).enumerate() {
         // The queue recedes: the piece you get next is lit, the ones behind it
         // fade back, so the eye lands on the right one without counting.
         let fade = 1.0 - i as f32 / (deep as f32 + 1.0);
-        capsule(b, x, y, p, m.color().mul(0.35 + 0.65 * fade), 0.8 * fade);
-        y += p + 2;
+        // The one arriving fades in as it climbs, rather than popping into the
+        // bottom of the column at full brightness.
+        let arriving = if i + 1 == deep {
+            1.0 - g.queue_slide()
+        } else {
+            1.0
+        };
+        capsule(
+            b,
+            x,
+            y,
+            p,
+            m.color().mul((0.35 + 0.65 * fade) * arriving),
+            0.8 * fade * arriving,
+        );
+        y += pitch;
     }
 
     readouts(
@@ -87,15 +105,23 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Tetris) {
 pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
     let shake = g.shake();
     let well = g.cells();
+    // The highest filled cell in each column — the only row that absorbs a
+    // landing, since it is the only one the piece actually touched.
+    let top_of = |mc: i32| -> Option<i32> {
+        (0..l.rows as i32).find(|&r| well[r as usize][mc as usize].is_some())
+    };
     let clearing = g.clearing_rows();
     let p = l.mino_px as i32;
 
     // No rule inside the well: a falling game does not need help seeing its
     // columns, and an empty well should look empty.
     floor(b, l, shake, Rule::None, &|_, _| false);
-    // The frame ignites while rows are lit and cools as they collapse.
+    // The frame ignites while rows are lit and cools as they collapse, and its
+    // lights run faster the better the player is doing — the same thing the
+    // warp field is saying, said again where the eye already is.
     let ignite = if clearing.is_empty() { 0.0 } else { 0.9 };
-    frame(b, l, shake, Kind::Tetris.hue(), ignite);
+    let chase = g.elapsed.as_secs_f32() * (0.45 + 1.6 * g.heat());
+    frame(b, l, shake, Kind::Tetris.hue(), ignite, chase);
 
     // The stack falls into a cleared gap over about a tenth of a second. A
     // block is drawn as many rows above where it now logically sits as there
@@ -120,7 +146,15 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
                 capsule(b, x, y, p, c(WHITE), 1.4);
                 continue;
             }
-            capsule(b, x, y, p, m.color().mul(0.82), 0.32);
+            // A landing is absorbed by the row it landed on: the block flattens
+            // for a tenth of a second and springs back. Only the top of the
+            // stack does it, or the whole well would breathe.
+            let squash = if Some(mr) == top_of(mc) {
+                (g.squash() * p as f32 * 0.35) as i32
+            } else {
+                0
+            };
+            capsule(b, x, y + squash, p - squash.min(p - 1), m.color().mul(0.82), 0.32);
         }
     }
 

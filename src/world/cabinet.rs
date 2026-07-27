@@ -31,32 +31,85 @@ pub fn ground(b: &mut Buf) {
 
 // ------------------------------------------------------------------- arena
 
-/// The arena's edge: a hard vector rectangle, one sub-pixel thick, in the
-/// game's own hue. `ignite` in `0.0..=1.0` drives it toward white — a frame
-/// that flares is the cheapest and loudest way to say a thing just landed.
-pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32) {
+/// The arena's edge, and the bulbs running round it.
+///
+/// A cabinet's marquee had lights chasing its border, and a static rectangle is
+/// the one thing on this screen that would otherwise never move. `phase` runs
+/// `0..1` round the perimeter; the game drives it faster the better the player
+/// is doing, so the frame is a second readout of the same thing the warp field
+/// is showing.
+///
+/// `ignite` in `0.0..=1.0` drives the whole border toward white — a frame that
+/// flares is the cheapest and loudest way to say a thing just landed.
+pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: f32) {
     let (x0, y0, x1, y1) = l.arena_sub(shake);
+    let (x0, y0, x1, y1) = (x0 - 1, y0 - 1, x1 + 1, y1 + 1);
     let col = hue.lerp(c(WHITE), ignite.clamp(0.0, 1.0));
     let glow = col.mul(0.26 + 0.9 * ignite);
-    for y in (y0 - 1)..=(y1 + 1) {
-        lit(b, x0 - 1, y, col, glow);
-        lit(b, x1 + 1, y, col, glow);
+    for y in y0..=y1 {
+        lit(b, x0, y, col, glow);
+        lit(b, x1, y, col, glow);
     }
-    for x in (x0 - 1)..=(x1 + 1) {
-        lit(b, x, y0 - 1, col, glow);
-        lit(b, x, y1 + 1, col, glow);
+    for x in x0..=x1 {
+        lit(b, x, y0, col, glow);
+        lit(b, x, y1, col, glow);
     }
     // Corner nubs: two sub-pixels of overshoot on each diagonal. A plain
     // rectangle reads as a text-mode box; the overshoot reads as a bezel.
     for (cx, cy, sx, sy) in [
-        (x0 - 1, y0 - 1, -1, -1),
-        (x1 + 1, y0 - 1, 1, -1),
-        (x0 - 1, y1 + 1, -1, 1),
-        (x1 + 1, y1 + 1, 1, 1),
+        (x0, y0, -1, -1),
+        (x1, y0, 1, -1),
+        (x0, y1, -1, 1),
+        (x1, y1, 1, 1),
     ] {
         for k in 1..=2 {
             lit(b, cx + sx * k, cy, col, glow);
             lit(b, cx, cy + sy * k, col, glow);
+        }
+    }
+    bulbs(b, (x0, y0, x1, y1), col, phase);
+}
+
+/// How many lights run the border at once, and how long each one's tail is.
+/// Long tails rather than dots: at this resolution a single bright sub-pixel
+/// travelling a perimeter is a flicker, and a comet is a light.
+const BULBS: usize = 4;
+const BULB_TAIL: i32 = 16;
+
+/// The sub-pixel `t` steps clockwise round a rectangle's perimeter from its
+/// top-left corner.
+fn perimeter(rect: (i32, i32, i32, i32), t: i32) -> (i32, i32) {
+    let (x0, y0, x1, y1) = rect;
+    let (w, h) = (x1 - x0, y1 - y0);
+    let per = 2 * (w + h);
+    let t = t.rem_euclid(per.max(1));
+    if t < w {
+        (x0 + t, y0)
+    } else if t < w + h {
+        (x1, y0 + (t - w))
+    } else if t < 2 * w + h {
+        (x1 - (t - w - h), y1)
+    } else {
+        (x0, y1 - (t - 2 * w - h))
+    }
+}
+
+fn bulbs(b: &mut Buf, rect: (i32, i32, i32, i32), hue: Rgb, phase: f32) {
+    let (x0, y0, x1, y1) = rect;
+    let per = 2 * ((x1 - x0) + (y1 - y0));
+    if per <= 0 {
+        return;
+    }
+    let head = (phase.rem_euclid(1.0) * per as f32) as i32;
+    for i in 0..BULBS {
+        let start = head + (per * i as i32) / BULBS as i32;
+        for k in 0..BULB_TAIL {
+            // Bright at the head and gone at the tail, so each light reads as
+            // travelling rather than as four dots blinking in sequence.
+            let fade = 1.0 - k as f32 / BULB_TAIL as f32;
+            let (x, y) = perimeter(rect, start - k);
+            let lit_col = hue.lerp(c(WHITE), fade * fade);
+            lit(b, x, y, lit_col, lit_col.mul(fade * fade * 2.2));
         }
     }
 }
@@ -108,15 +161,32 @@ pub fn floor(b: &mut Buf, l: &Layout, shake: i32, rule: Rule, filled: &dyn Fn(i3
 /// `blink` alternates the `1UP` marker, which is the only part of the strip
 /// that moves — and the reason a still frame of an arcade screen always looks
 /// like it is running.
-pub fn strip(
-    b: &mut Buf,
-    l: &Layout,
-    score: u32,
-    name: &str,
-    best: u32,
-    blink: bool,
-    shout: Option<(&str, f32)>,
-) {
+/// Everything the status strip says at once. One value rather than eight
+/// arguments, because every screen fills all of it and half of them are
+/// booleans that would otherwise be positional.
+pub struct Strip<'a> {
+    pub score: u32,
+    pub best: u32,
+    pub name: &'a str,
+    /// Alternates the `1UP` marker — the only part of the strip that moves on
+    /// its own, and the reason a still of an arcade screen looks like it is
+    /// running.
+    pub blink: bool,
+    /// What the game has to say, which takes the middle slot off its own name.
+    pub shout: Option<(&'a str, f32)>,
+    /// How far the score is still lifting from its last change.
+    pub hot: f32,
+}
+
+pub fn strip(b: &mut Buf, l: &Layout, s: &Strip) {
+    let Strip {
+        score,
+        best,
+        name,
+        blink,
+        shout,
+        hot,
+    } = *s;
     let y = l.strip_sub as i32;
     let left = format!("1UP {score:06}");
     let right = format!("HI {best:06}");
@@ -126,18 +196,22 @@ pub fn strip(
     // confirming it.
     let labelled = text_w(&left, 1) + text_w(&right, 1) + 8 <= l.w as i32;
 
+    // The score lifts for a moment whenever it moves. It is the number the
+    // whole machine is about, and a number that only ever sits there is one
+    // nobody watches change.
+    let live = c(WHITE).mul(1.0 + hot);
     let rx = if labelled {
         if blink {
             text(b, "1UP", 2, y, 1, c(RED), 0.6);
         }
-        text(b, &left[3..], 2 + text_w("1UP", 1), y, 1, c(WHITE), 0.35);
+        text(b, &left[3..], 2 + text_w("1UP", 1), y, 1, live, 0.35 + hot);
         let rx = l.w as i32 - text_w(&right, 1) - 2;
         text(b, "HI", rx, y, 1, c(CYAN), 0.5);
         text(b, &right[2..], rx + text_w("HI", 1), y, 1, c(YELLOW), 0.35);
         rx
     } else {
         let (l6, r6) = (format!("{score:06}"), format!("{best:06}"));
-        text(b, &l6, 2, y, 1, c(WHITE), 0.35);
+        text(b, &l6, 2, y, 1, live, 0.35 + hot);
         let rx = l.w as i32 - text_w(&r6, 1) - 2;
         text(b, &r6, rx, y, 1, c(YELLOW), 0.35);
         rx

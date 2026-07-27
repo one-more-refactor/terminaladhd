@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use crate::games::{Game, Kind};
 use crate::scores::Entry;
-use crate::world::cabinet::{ground, pop, rule, strip, ticker};
+use crate::world::cabinet::{ground, pop, rule, strip, ticker, Strip};
 use crate::world::draw::{lit, text, text_center, text_w};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
@@ -79,6 +79,11 @@ pub struct Stage {
     fired_hue: Rgb,
     /// Where the light rip is, `0..1` down the picture, and how hard.
     rip: (f32, f32),
+    /// The last score drawn, and how much the strip is still lifting from the
+    /// change — the score is what the machine is about, and a number that never
+    /// reacts is one nobody watches.
+    shown_score: u32,
+    score_hot: f32,
     /// Where the supply hum currently is, `0.0..=1.0` down the picture.
     hum: f32,
     /// What this frame is allowed to spend.
@@ -293,6 +298,8 @@ impl Stage {
             fired: None,
             fired_hue: c(WHITE),
             rip: (0.0, 0.0),
+            shown_score: 0,
+            score_hot: 0.0,
             hum: 0.0,
             quality: Quality::full(),
             buf: Buf::new(w, h),
@@ -378,7 +385,10 @@ impl Stage {
             c(CYAN),
             0.6,
         );
-        chrome_word(&mut self.buf, TITLE, scale, l_w * 0.5, mid - 10.0);
+        // The marquee breathes. A wordmark that sits perfectly still on an
+        // otherwise moving screen is the one thing that reads as a screenshot.
+        let breathe = (t * 1.9).sin() * 1.5;
+        chrome_word(&mut self.buf, TITLE, scale, l_w * 0.5, mid - 10.0 + breathe);
 
         // The one blinking thing on the screen, at the rate every cabinet used.
         if (t * 1.6) as i32 % 2 == 0 {
@@ -652,7 +662,24 @@ impl Stage {
         tick: &Tick,
         shout: Option<(&str, f32)>,
     ) {
-        strip(&mut self.buf, &self.layout, score, name, best, blink, shout);
+        if score != self.shown_score {
+            self.shown_score = score;
+            self.score_hot = 1.0;
+        }
+        let hot = self.score_hot;
+        self.score_hot = (self.score_hot - 0.14).max(0.0);
+        strip(
+            &mut self.buf,
+            &self.layout,
+            &Strip {
+                score,
+                best,
+                name,
+                blink,
+                shout,
+                hot,
+            },
+        );
         rule(&mut self.buf, &self.layout, self.progress);
         ticker(&mut self.buf, &self.layout, &tick.left, &tick.right);
         self.post();
