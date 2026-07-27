@@ -99,7 +99,8 @@ fn main() -> ExitCode {
 /// Dump the frames a change has to be judged on: every screen the machine can
 /// show, for every game it can land on.
 fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
-    use terminaladhd::games::{Kind, ALL};
+    use terminaladhd::games::{Game, Kind, ALL};
+    use terminaladhd::rng::Rng;
     use terminaladhd::scores::Entry;
     use terminaladhd::stage::{write_ppm, Settle, Stage, Tick};
 
@@ -144,6 +145,27 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     stage.game(mid.as_ref(), 9200, true, &tick);
     dump(&stage, "lean")?;
     stage.quality = terminaladhd::stage::Quality::full();
+
+    // A piece caught between rows and a hard drop's streak still in the air —
+    // the two things a still normally cannot show about how it moves.
+    {
+        use std::time::Duration;
+        use terminaladhd::games::Input;
+        let mut g = terminaladhd::games::Tetris::with_rng(Rng::from_seed(11));
+        for _ in 0..40 {
+            g.step(&Input::default(), Duration::from_millis(16));
+        }
+        g.step(
+            &Input {
+                hard: true,
+                ..Default::default()
+            },
+            Duration::from_millis(16),
+        );
+        g.step(&Input::default(), Duration::from_millis(16));
+        stage.game(&g, 9200, true, &tick);
+        dump(&stage, "motion")?;
+    }
 
     // Every beat of the loudest reaction the machine has, so a still can show
     // what a Tetris actually looks like rather than only describing it.

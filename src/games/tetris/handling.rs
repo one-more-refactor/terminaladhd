@@ -10,14 +10,15 @@
 
 use std::time::Duration;
 
-/// Delay before a held direction begins to auto-repeat.
-pub const DAS: Duration = Duration::from_millis(133);
+/// Delay before a held direction begins to auto-repeat. A tenth of a second is
+/// about as long as a hold can wait before it reads as the game not listening.
+pub const DAS: Duration = Duration::from_millis(100);
 /// Interval between auto-repeat shifts once charged. One render frame.
 pub const ARR: Duration = Duration::from_millis(16);
 /// Soft drop is this many times faster than gravity…
 pub const SDF: u32 = 20;
 /// …but never faster than one row per this long, so it stays watchable.
-pub const SOFT_FLOOR: Duration = Duration::from_millis(25);
+pub const SOFT_FLOOR: Duration = Duration::from_millis(15);
 /// A grounded piece locks after this long unless disturbed.
 pub const LOCK_DELAY: Duration = Duration::from_millis(500);
 /// Moves and turns that may each buy back the lock window. Uncapped, a piece

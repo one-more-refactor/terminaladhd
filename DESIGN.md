@@ -101,6 +101,32 @@ hairline fading out under it and returns where content starts. Both games stack
 everything through it, so the queue and the readings share a left edge and a
 rhythm.
 
+## Everything glides
+
+The logic of both games moves in whole cells. Nothing on screen does.
+
+Snake was done first and tetris was left snapping, which is exactly what it felt
+like: one game moved and the other stepped. A falling piece is drawn part of a
+row down under gravity — `fall_accum` is already the fraction, so the position
+was there all along and only the painter had to ask for it — and part of a cell
+behind its own column after a sideways move, catching up over 55 ms. Whole-cell
+steps are what make a falling game feel like a spreadsheet.
+
+Two rules keep it honest. A **grounded piece sits exactly on its cell**: it is
+about to be part of the stack, and a stack that floats reads as a bug. And a
+**lock squares everything up**, so whatever the piece was doing on the way down,
+the board is a grid again the moment it lands.
+
+The stack falls into a cleared gap rather than teleporting into it. The board
+collapses logically at once and the picture catches up over 110 ms: a block is
+drawn as many rows above where it now sits as there were cleared rows beneath
+it, scaled by how far the collapse has left to go. A hard drop leaves a wake in
+the piece's own colour from the top of the fall to the bottom, brightest where
+the piece was longest ago.
+
+And the handling was slow. DAS was 133 ms, which is long enough to read as the
+game not listening; it is 100. The soft-drop floor was 25 ms a row and is 15.
+
 ## Snake glides
 
 The reference for game feel is `blipscreen`'s snake, and the thing it does that

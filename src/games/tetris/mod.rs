@@ -81,6 +81,27 @@ const HITSTOP_OVER: u32 = 10;
 /// How long a `+N` marker stays in the air.
 const POP_SECS: f32 = 0.8;
 
+/// How long a sideways move takes to catch up with itself on screen. Short
+/// enough that it never lags the input, long enough that the piece is seen to
+/// travel rather than to teleport — which is the whole difference between a
+/// game that feels responsive and one that feels like a spreadsheet.
+const SHIFT_GLIDE: f32 = 0.055;
+
+/// The wake a hard drop leaves: the piece, where its cells were at the top of
+/// the fall, how many rows it crossed, and how much of its life is left.
+#[derive(Clone, Copy, Debug)]
+pub struct Trail {
+    pub mino: Mino,
+    pub cells: [(i32, i32); 4],
+    pub rows: i32,
+    pub life: f32,
+}
+
+/// How long the stack takes to fall into a cleared gap, and how long a hard
+/// drop's trail hangs in the air behind it.
+const COLLAPSE_SECS: f32 = 0.11;
+const TRAIL_SECS: f32 = 0.16;
+
 /// How long a praise banner stays up. Long enough to read mid-drop, short
 /// enough that it is gone before the next lock wants the same space.
 const PRAISE_SECS: f32 = 1.4;
@@ -98,8 +119,19 @@ pub struct Tetris {
     /// The offset the last rotation used, set only while the last thing that
     /// moved the piece was a rotation — the last-move rule for spins.
     spun: Option<usize>,
-    /// Fractional rows of gravity accumulated but not yet applied.
+    /// Fractional rows of gravity accumulated but not yet applied. Doubles as
+    /// the piece's sub-row position on screen: a piece a third of the way to
+    /// the next row is drawn a third of the way there.
     fall_accum: f32,
+    /// Cells the piece is still visually behind its own column, decaying to
+    /// zero. Negative means it is catching up from the left.
+    glide_x: f32,
+    /// Rows collapsing into a cleared gap, `0.0..=1.0`, and the rows that are
+    /// going. Held after the logical collapse so the stack is seen to fall.
+    collapse: f32,
+    collapsed: Vec<usize>,
+    /// The streak a hard drop left behind it.
+    trail: Option<Trail>,
     score: u32,
     lines: u32,
     /// Consecutive line-clearing pieces; a clean lock breaks it.
@@ -140,6 +172,10 @@ impl Tetris {
             handling: Handling::new(SPAWN_Y),
             spun: None,
             fall_accum: 0.0,
+            glide_x: 0.0,
+            collapse: 0.0,
+            collapsed: Vec::new(),
+            trail: None,
             score: 0,
             lines: 0,
             combo: 0,
@@ -270,6 +306,22 @@ impl Tetris {
             p.life -= dts / POP_SECS;
         }
         self.pops.retain(|p| p.life > 0.0);
+        // The piece catches up with its own column, the stack falls into the
+        // gap, and a hard drop's streak fades. None of these are the game — the
+        // game already happened — they are the game being seen.
+        self.glide_x -= self.glide_x.signum() * (dts / SHIFT_GLIDE).min(self.glide_x.abs());
+        if self.collapse > 0.0 {
+            self.collapse = (self.collapse - dts / COLLAPSE_SECS).max(0.0);
+            if self.collapse == 0.0 {
+                self.collapsed.clear();
+            }
+        }
+        if let Some(t) = &mut self.trail {
+            t.life -= dts / TRAIL_SECS;
+            if t.life <= 0.0 {
+                self.trail = None;
+            }
+        }
 
         // A clear freezes the world for its window, then collapses and reloads.
         if !self.clearing.is_empty() {
@@ -292,8 +344,23 @@ impl Tetris {
         }
         if input.hard {
             self.heat = (self.heat + 0.1).min(1.0);
+            let from = self.piece.y;
+            let kind = self.piece.kind;
+            let cells = self.piece.cells();
             while self.step_down() {
                 self.score += HARD_DROP_POINTS;
+            }
+            // The streak is drawn from where the piece was to where it is, so a
+            // drop across the whole well reads as a drop rather than as the
+            // piece having always been at the bottom.
+            let rows = self.piece.y - from;
+            if rows > 0 {
+                self.trail = Some(Trail {
+                    mino: kind,
+                    cells,
+                    rows,
+                    life: 1.0,
+                });
             }
             self.lock();
             return;
@@ -384,6 +451,9 @@ impl Tetris {
             .fits(self.piece.kind, self.piece.rot, self.piece.x + dx, self.piece.y)
         {
             self.piece.x += dx;
+            // The screen starts a cell behind and catches up. Capped at one
+            // cell so a wall charge does not smear.
+            self.glide_x = (self.glide_x - dx as f32).clamp(-1.0, 1.0);
             self.spun = None;
             let grounded = self.grounded();
             self.handling.touch(grounded);
@@ -406,6 +476,8 @@ impl Tetris {
     /// Stamp the piece into the board, score the lock as one [`Action`], and
     /// either begin a line-clear or bring on the next piece.
     fn lock(&mut self) {
+        self.glide_x = 0.0;
+        self.fall_accum = 0.0;
         let spin = rules::classify(&self.board, &self.piece, self.spun);
         let kind = self.piece.kind;
         let cells = self.piece.cells();
@@ -475,6 +547,10 @@ impl Tetris {
 
     fn finish_clear(&mut self) {
         let rows = std::mem::take(&mut self.clearing);
+        // The board collapses now and the picture catches up over the next
+        // hundred milliseconds, which is why the rows that went are kept.
+        self.collapsed = rows.clone();
+        self.collapse = 1.0;
         self.board.collapse(&rows);
         self.lines += rows.len() as u32;
         if !self.spawn() {
@@ -652,6 +728,30 @@ impl Tetris {
 
     /// Fraction of the lock window elapsed for a grounded piece, for a
     /// grounded-piece ghost pulse; zero when airborne.
+    /// How far the live piece has fallen past its logical row, `0.0..1.0`, and
+    /// how far it still is from its own column. The painter offsets by both, so
+    /// a piece slides rather than steps.
+    pub fn drift(&self) -> (f32, f32) {
+        if self.grounded() {
+            // A grounded piece sits exactly on its cell: it is about to be part
+            // of the stack, and a stack that floats reads as a bug.
+            (self.glide_x, 0.0)
+        } else {
+            (self.glide_x, self.fall_accum.clamp(0.0, 1.0))
+        }
+    }
+
+    /// The stack falling into a cleared gap: how far it still has to go, and
+    /// which rows went. A block above `n` of those rows is drawn `n * phase`
+    /// rows higher than it now logically is.
+    pub fn collapsing(&self) -> (f32, &[usize]) {
+        (self.collapse, &self.collapsed)
+    }
+
+    pub fn trail(&self) -> Option<Trail> {
+        self.trail
+    }
+
     pub fn lock_phase(&self) -> f32 {
         if self.grounded() {
             self.handling.lock_phase()
@@ -1002,6 +1102,91 @@ mod tests {
         let active_bottom = cells.iter().map(|&(_, r)| r).max().unwrap();
         let ghost_bottom = ghost.iter().map(|&(_, r)| r).max().unwrap();
         assert!(ghost_bottom >= active_bottom);
+    }
+}
+
+#[cfg(test)]
+mod motion {
+    use super::*;
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    #[test]
+    fn a_falling_piece_is_drawn_between_rows() {
+        let mut g = Tetris::with_rng(Rng::from_seed(3));
+        // Part of a row's worth of gravity: the piece has not stepped yet, and
+        // the screen has to show that it is on its way.
+        g.advance(&Input::default(), ms(100));
+        let (_, dy) = g.drift();
+        assert!(dy > 0.0 && dy < 1.0, "not between rows: {dy}");
+    }
+
+    #[test]
+    fn a_grounded_piece_sits_exactly_on_its_cell() {
+        let mut g = Tetris::with_rng(Rng::from_seed(4));
+        // Drop it to the floor and let it settle.
+        while g.piece.y < 30 && g.step_down() {}
+        let (_, dy) = g.drift();
+        assert_eq!(dy, 0.0, "a stack that floats reads as a bug");
+    }
+
+    #[test]
+    fn a_sideways_move_starts_behind_and_catches_up() {
+        let mut g = Tetris::with_rng(Rng::from_seed(5));
+        let input = Input {
+            right: true,
+            ..Default::default()
+        };
+        g.advance(&input, ms(16));
+        let (dx, _) = g.drift();
+        assert!(dx < 0.0, "the screen did not lag the move: {dx}");
+        assert!(dx >= -1.0, "and it lagged by more than a cell: {dx}");
+        // And it is gone shortly after, rather than trailing forever.
+        g.advance(&Input::default(), ms(120));
+        assert_eq!(g.drift().0, 0.0);
+    }
+
+    #[test]
+    fn locking_puts_the_piece_back_on_the_grid() {
+        let mut g = Tetris::with_rng(Rng::from_seed(6));
+        g.advance(
+            &Input {
+                right: true,
+                ..Default::default()
+            },
+            ms(16),
+        );
+        g.advance(
+            &Input {
+                hard: true,
+                ..Default::default()
+            },
+            ms(16),
+        );
+        // Whatever the piece was doing on its way down, the stack is square.
+        assert_eq!(g.glide_x, 0.0);
+        assert_eq!(g.fall_accum, 0.0);
+    }
+
+    #[test]
+    fn a_hard_drop_leaves_a_streak_that_fades() {
+        let mut g = Tetris::with_rng(Rng::from_seed(7));
+        g.advance(
+            &Input {
+                hard: true,
+                ..Default::default()
+            },
+            ms(16),
+        );
+        let t = g.trail().expect("a drop across the well leaves one");
+        assert!(t.rows > 5, "the streak covers the fall: {}", t.rows);
+        assert!(t.life > 0.9);
+        for _ in 0..20 {
+            g.advance(&Input::default(), ms(16));
+        }
+        assert!(g.trail().is_none(), "and it does not hang there");
     }
 }
 

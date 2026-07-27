@@ -9,7 +9,7 @@
 
 use crate::games::Kind;
 use crate::world::cabinet::{burst, floor, frame, heading, readouts, Rule, Stat};
-use crate::world::draw::{capsule, lit};
+use crate::world::draw::{add_emis, capsule, lit};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
 use crate::world::{hex, Buf, Rgb};
@@ -97,17 +97,47 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
     let ignite = if clearing.is_empty() { 0.0 } else { 0.9 };
     frame(b, l, shake, Kind::Tetris.hue(), ignite);
 
+    // The stack falls into a cleared gap over about a tenth of a second. A
+    // block is drawn as many rows above where it now logically sits as there
+    // were cleared rows under it, scaled by how far the collapse has to go.
+    let (collapse, gone) = g.collapsing();
+    let lift = |mr: i32| -> f32 {
+        if collapse <= 0.0 {
+            return 0.0;
+        }
+        let under = gone.iter().filter(|&&r| (r as i32) > mr).count();
+        -(under as f32) * collapse
+    };
+
     for mr in 0..l.rows as i32 {
         for mc in 0..l.cols as i32 {
             let Some(m) = well[mr as usize][mc as usize] else {
                 continue;
             };
             let (x, y) = l.cell_origin(mc, mr, shake);
+            let y = y + (lift(mr) * p as f32) as i32;
             if clearing.contains(&(mr as usize)) {
                 capsule(b, x, y, p, c(WHITE), 1.4);
                 continue;
             }
             capsule(b, x, y, p, m.color().mul(0.82), 0.32);
+        }
+    }
+
+    // The streak a hard drop leaves: a column of the piece's own light from
+    // where it started to where it stopped, fading out behind it.
+    if let Some(t) = g.trail() {
+        let col = t.mino.color().mul(t.life * t.life * 0.9);
+        for &(mc, mr) in &t.cells {
+            let (x, top) = l.cell_origin(mc, mr, shake);
+            for dy in 0..(t.rows * p) {
+                // Brightest at the top of the fall, where the piece was
+                // longest ago, so the streak reads as a wake.
+                let k = 1.0 - dy as f32 / (t.rows * p) as f32;
+                for dx in 0..p {
+                    add_emis(b, x + dx, top + dy, col.mul(k * 0.8));
+                }
+            }
         }
     }
 
@@ -123,9 +153,15 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
         // have to count.
         let urgency = g.lock_phase();
         let fill = mino.color().lerp(c(WHITE), 0.5 * urgency);
+        // The piece is drawn where it is going, not where it has got to: part
+        // of a row down under gravity and part of a cell behind its own column
+        // after a shift. Whole-cell steps are what make a falling game feel
+        // like a spreadsheet.
+        let (dx, dy) = g.drift();
+        let (ox, oy) = ((dx * p as f32) as i32, (dy * p as f32) as i32);
         for &(mc, mr) in &cells {
             let (x, y) = l.cell_origin(mc, mr, shake);
-            capsule(b, x, y, p, fill, 0.9 + 0.7 * urgency);
+            capsule(b, x + ox, y + oy, p, fill, 0.9 + 0.7 * urgency);
         }
     }
 
