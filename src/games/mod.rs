@@ -167,17 +167,22 @@ impl Kind {
         }
     }
 
-    /// The colour of this game's arena frame. Not decoration: it is the first
-    /// thing that says what you are playing, and a frame you must not touch is
-    /// warm where one that is merely furniture is cool.
+    /// The colour of this game's arena frame.
     ///
-    /// Amber rather than red for the hazard. Red on black is the one
-    /// combination on this palette that reads as an error dialogue, and a
-    /// warning that looks like a failure makes the whole screen feel broken.
+    /// It used to carry the hazard — warm where the walls kill, cool where they
+    /// are furniture — and that idea produced first a red frame and then an
+    /// amber one, both of which were the ugliest thing on the screen. A
+    /// boundary is not the right place to say it: the wall warning already
+    /// says it, locally, at the moment it matters and in the direction it
+    /// matters, which is everything a resting colour cannot do.
+    ///
+    /// So the frame is only an edge now. Snake gets a cool white rail because
+    /// its body already runs cyan to magenta and its morsel is green; there is
+    /// no hot hue left that would not be competing with the game inside it.
     pub fn hue(self) -> Rgb {
         hex(match self {
             Kind::Tetris => CYAN,
-            Kind::Snake => ORANGE,
+            Kind::Snake => RAIL,
         })
     }
 

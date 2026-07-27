@@ -247,7 +247,9 @@ impl Keys {
             KeyCode::Char('c') | KeyCode::Char('C') => self.hold = true,
             KeyCode::Enter => self.enter = true,
             KeyCode::Backspace | KeyCode::Tab => self.back = true,
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => self.quit = true,
+            // Esc and Ctrl-C only. `q` sits under the same hand as everything
+            // else and quitting is the one action with no undo.
+            KeyCode::Esc => self.quit = true,
             // Readline arrows, for terminals that send them instead.
             KeyCode::Char('b') | KeyCode::Char('B') if ctrl => self.left = true,
             KeyCode::Char('f') | KeyCode::Char('F') if ctrl => self.right = true,

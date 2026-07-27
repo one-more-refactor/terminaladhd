@@ -203,7 +203,8 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Snake) {
     floor(b, l, shake, Rule::Lattice, &|mc, mr| {
         occupied.contains(&(mc, mr))
     });
-    // The frame flares when an apple lands and when the run ends.
+    // The frame flares when an apple lands and when the run ends. It is the
+    // only time it is allowed to be brighter than the field.
     let ignite = if g.death() > 0.0 {
         (1.0 - g.death()).max(0.0)
     } else {

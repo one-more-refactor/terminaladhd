@@ -30,6 +30,9 @@ pub mod palette {
     pub const BLUE: u32 = 0x2A6BFF;
     pub const VIOLET: u32 = 0xB84BFF;
     pub const WHITE: u32 = 0xFFFFFF;
+    /// A cool white rail. Not one of the hot hues: it is what an edge is made
+    /// of when the edge is not trying to mean anything.
+    pub const RAIL: u32 = 0xBFD8FF;
 }
 
 use palette::*;

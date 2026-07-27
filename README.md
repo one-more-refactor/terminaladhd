@@ -46,8 +46,9 @@ second and falls back. Play well and the whole screen goes faster.
 The rest is the arcade convention, near enough verbatim, because it is chrome
 every player already knows how to read: `1UP` blinking over the live score at
 the top left, the game's name in the middle, `HI` and the record at the right,
-and a hard vector frame around the arena — cyan where the walls are furniture,
-amber where they kill. When a game has something to shout — TETRIS, GOLDEN, a
+and a hard rail around the arena, which is only an edge — what the walls do to
+you is said by the wall itself, lighting up as you close on it. When a game has
+something to shout — TETRIS, GOLDEN, a
 streak — it takes the middle slot off its own name. A machine talks to you from
 its status strip.
 

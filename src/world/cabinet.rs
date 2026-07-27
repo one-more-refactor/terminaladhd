@@ -58,13 +58,13 @@ pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: 
     // finish; two read as a rail with a shadow.
     let inner = (ax0 - 1, ay0 - 1, ax1 + 1, ay1 + 1);
     let outer = (ax0 - 2, ay0 - 2, ax1 + 2, ay1 + 2);
-    edge(b, outer, col.mul(0.30), col.mul(0.10 + 0.4 * ignite));
-    edge(b, inner, col, col.mul(0.30 + 1.0 * ignite));
+    edge(b, outer, col.mul(0.18), col.mul(0.04 + 0.3 * ignite));
+    edge(b, inner, col.mul(0.85), col.mul(0.16 + 0.9 * ignite));
 
-    // Corners are the same rule, brighter and run a little way along both
-    // edges. Nothing sticks out of the rectangle.
-    let reach = (l.mino_px as i32 * 2).clamp(4, 12);
-    let hot = col.lerp(c(WHITE), 0.5);
+    // Corners are the same rule run a little way along both edges. Nothing
+    // sticks out of the rectangle, and nothing is brighter than the game
+    // inside it — a frame that outshines the playfield is a picture frame.
+    let reach = (l.mino_px as i32 * 3 / 2).clamp(3, 9);
     for (cx, cy, sx, sy) in [
         (ax0 - 1, ay0 - 1, 1, 1),
         (ax1 + 1, ay0 - 1, -1, 1),
@@ -73,9 +73,10 @@ pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: 
     ] {
         for k in 0..reach {
             let fade = 1.0 - k as f32 / reach as f32;
-            let g = hot.mul(0.5 * fade);
-            lit(b, cx + sx * k, cy, hot, g);
-            lit(b, cx, cy + sy * k, hot, g);
+            let bright = col.lerp(c(WHITE), 0.35 * fade);
+            let g = bright.mul(0.22 * fade);
+            lit(b, cx + sx * k, cy, bright, g);
+            lit(b, cx, cy + sy * k, bright, g);
         }
     }
 
@@ -134,7 +135,7 @@ fn bulbs(b: &mut Buf, rect: (i32, i32, i32, i32), hue: Rgb, phase: f32) {
             let fade = 1.0 - k as f32 / BULB_TAIL as f32;
             let (x, y) = perimeter(rect, start - k);
             let lit_col = hue.lerp(c(WHITE), fade * fade);
-            lit(b, x, y, lit_col, lit_col.mul(fade * fade * 2.2));
+            lit(b, x, y, lit_col, lit_col.mul(fade * fade * 1.5));
         }
     }
 }

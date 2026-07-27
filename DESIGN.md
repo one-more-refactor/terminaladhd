@@ -46,7 +46,7 @@ What is on screen now:
 | ground | flat near-black | the black a monitor is at rest |
 | warp field | streaks flying outward from behind the arena | a readout of how well you are doing |
 | arena | the game | the game |
-| frame | a hard vector rectangle round the arena | says which game, and whether the walls kill |
+| frame | a hard rail round the arena | says where the field ends, and nothing else |
 | columns | HOLD, NEXT, the readings | the numbers you are chasing |
 | strip | `1UP` / score / name / `HI` | conventions every player can already read |
 | monitor | bloom, scanlines, vignette, fringe, hum | says *tube* rather than *panel* |
@@ -154,15 +154,32 @@ game not listening; it is 100. The soft-drop floor was 25 ms a row and is 15.
 
 ## The edge of the field
 
-It was a hairline with two sub-pixels of overshoot poking out of each corner.
-The overshoot was meant to read as a bezel and read as whiskers, and one
-sub-pixel under this much bloom is a fuzzy line rather than an edge.
+The frame used to carry the hazard: warm where the walls kill, cool where they
+are furniture. That idea produced first a red rail and then an amber one, and
+both were the ugliest thing on the screen — which is the tell that the idea was
+wrong rather than the colours. A boundary is not the place to say what a
+boundary does. The wall warning already says it, locally, at the moment it
+matters and in the direction it matters, which is everything a resting colour
+cannot do.
+
+So the rail is only an edge. Snake's is cool white, because its body already
+runs cyan to magenta and its morsel is green, and there is no hot hue left that
+would not be competing with the game inside it.
+
+The shape took two goes as well. It was a hairline with two sub-pixels of
+overshoot poking out of each corner. The overshoot was meant to read as a bezel
+and read as whiskers, and one sub-pixel under this much bloom is a fuzzy line
+rather than an edge.
 
 It is two rules now — a bright inner one that is the actual edge of the field,
 and a dim outer one half a step away. One line reads as a hairline someone
 forgot to finish; two read as a rail with a shadow under it. The corners are
 made of the same rule, run brighter and a little way along both edges, so
 nothing sticks out of the rectangle at all.
+
+Nothing on it is brighter than the game inside it, either. A frame that
+outshines the playfield is a picture frame, and the only time it is allowed to
+be the brightest thing is the moment it flares for a clear or a crash.
 
 The layout reserves the depth. An arena pushed against the frame edge would
 otherwise lose one of the two rules down that side, which is the sort of thing
