@@ -64,6 +64,12 @@ const SYNC_FRAMES: u32 = 7;
 /// How fast the `1UP` marker alternates, in frames.
 const BLINK_FRAMES: u32 = 24;
 
+/// How long the attract loop holds each of its screens. A cabinet left alone
+/// did not show one picture — it cycled the marquee, the board and a demo, and
+/// that cycle is most of why an idle machine still looked alive from across the
+/// room.
+const ATTRACT_CYCLE: f32 = 5.5;
+
 /// What the loop is running for. The standalone arcade is [`Forever`]; a
 /// wrapped command reports through its own implementation, and the loop ends
 /// when [`Host::finished`] says so.
@@ -383,7 +389,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         }
 
         match &machine.mode {
-            Mode::Attract { .. } => {
+            Mode::Attract { since } => {
                 // The attract ticker teaches instead of reporting: it is the one
                 // screen where the player is not yet busy, and the only place
                 // the controls can be read without covering the command's own
@@ -392,8 +398,16 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
                     left: demo_kind.hint().to_string(),
                     right: tick.right.clone(),
                 };
+                let idle = since.elapsed().as_secs_f32();
                 let t = frame_no as f32 * STEP.as_secs_f32();
-                stage.attract(demo.as_ref(), scores.best(demo_kind), blink, t, &teach);
+                if ((idle / ATTRACT_CYCLE) as u32).is_multiple_of(2) {
+                    stage.attract(demo.as_ref(), scores.best(demo_kind), blink, t, &teach);
+                } else {
+                    // The board the demo is playing for, so the two halves of
+                    // the loop are about the same game.
+                    let rows = scores.top(demo_kind);
+                    stage.board(demo_kind, &rows, None, idle, scores.best(demo_kind), &teach);
+                }
             }
             Mode::Spin { reel, age } => {
                 let t = (age / SPIN_TIME.as_secs_f32()).clamp(0.0, 1.0);
