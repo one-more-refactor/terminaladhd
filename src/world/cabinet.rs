@@ -58,8 +58,12 @@ pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: 
     // finish; two read as a rail with a shadow.
     let inner = (ax0 - 1, ay0 - 1, ax1 + 1, ay1 + 1);
     let outer = (ax0 - 2, ay0 - 2, ax1 + 2, ay1 + 2);
-    edge(b, outer, col.mul(0.18), col.mul(0.04 + 0.3 * ignite));
-    edge(b, inner, col.mul(0.85), col.mul(0.16 + 0.9 * ignite));
+    // No glow at rest. A lit rail feeds the bloom pass, and bloom over a black
+    // field turns a one-sub-pixel line into a soft grey band hanging above and
+    // below it — which reads as haze rather than as an edge, and is the ugliest
+    // thing a frame can do. It gets its light back only when it flares.
+    edge(b, outer, col.mul(0.18), col.mul(0.3 * ignite));
+    edge(b, inner, col.mul(0.85), col.mul(1.1 * ignite));
 
     // Corners are the same rule run a little way along both edges. Nothing
     // sticks out of the rectangle, and nothing is brighter than the game
@@ -74,9 +78,8 @@ pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: 
         for k in 0..reach {
             let fade = 1.0 - k as f32 / reach as f32;
             let bright = col.lerp(c(WHITE), 0.35 * fade);
-            let g = bright.mul(0.22 * fade);
-            lit(b, cx + sx * k, cy, bright, g);
-            lit(b, cx, cy + sy * k, bright, g);
+            put_base(b, cx + sx * k, cy, bright);
+            put_base(b, cx, cy + sy * k, bright);
         }
     }
 
@@ -209,84 +212,53 @@ pub fn flash_arena(b: &mut Buf, l: &Layout, shake: i32) {
 /// `blink` alternates the `1UP` marker, which is the only part of the strip
 /// that moves — and the reason a still frame of an arcade screen always looks
 /// like it is running.
-/// Everything the status strip says at once. One value rather than eight
-/// arguments, because every screen fills all of it and half of them are
-/// booleans that would otherwise be positional.
+/// The one row of chrome.
+///
+/// Everything that is not the game lives here: the score at the left, whatever
+/// the game has to shout after it, the wrapped command's last line, and the
+/// clock at the right. It used to be a bar across the top carrying a `1UP`
+/// marker, the game's name and the all-time best, plus a second row under the
+/// well for the score, plus a third for the command.
+///
+/// The marker said nothing. The name is answered by looking at the game. The
+/// record belongs on the screen where records are read. And three rows of
+/// chrome around a game is a dashboard — one row is a cabinet.
 pub struct Strip<'a> {
     pub score: u32,
-    pub best: u32,
-    pub name: &'a str,
-    /// Alternates the `1UP` marker — the only part of the strip that moves on
-    /// its own, and the reason a still of an arcade screen looks like it is
-    /// running.
-    pub blink: bool,
-    /// What the game has to say, which takes the middle slot off its own name.
+    /// What the game has to shout, which takes the space beside the score.
     pub shout: Option<(&'a str, f32)>,
+    /// The wrapped command's last line, or empty when nothing is running.
+    pub left: &'a str,
+    pub right: &'a str,
     /// How far the score is still lifting from its last change.
     pub hot: f32,
 }
 
 pub fn strip(b: &mut Buf, l: &Layout, s: &Strip) {
-    let Strip {
-        score,
-        best,
-        name,
-        blink,
-        shout,
-        hot,
-    } = *s;
-    let y = l.strip_sub as i32;
-    let left = format!("1UP {score:06}");
-    let right = format!("HI {best:06}");
-    // On a frame too narrow for the markers the numbers keep their colours and
-    // lose their labels. White on the left is the live score and yellow on the
-    // right is the record on every machine ever built; the words were only ever
-    // confirming it.
-    let labelled = text_w(&left, 1) + text_w(&right, 1) + 8 <= l.w as i32;
+    let y = l.ticker_sub.unwrap_or(2 * l.h - 6) as i32;
+    let dim = c(STEEL).mul(0.75);
 
-    // The score lifts for a moment whenever it moves. It is the number the
-    // whole machine is about, and a number that only ever sits there is one
-    // nobody watches change.
-    let live = c(WHITE).mul(1.0 + hot);
-    let rx = if labelled {
-        if blink {
-            text(b, "1UP", 2, y, 1, c(RED), 0.6);
-        }
-        text(b, &left[3..], 2 + text_w("1UP", 1), y, 1, live, 0.35 + hot);
-        let rx = l.w as i32 - text_w(&right, 1) - 2;
-        text(b, "HI", rx, y, 1, c(CYAN), 0.5);
-        text(b, &right[2..], rx + text_w("HI", 1), y, 1, c(YELLOW), 0.35);
-        rx
-    } else {
-        let (l6, r6) = (format!("{score:06}"), format!("{best:06}"));
-        text(b, &l6, 2, y, 1, live, 0.35 + hot);
-        let rx = l.w as i32 - text_w(&r6, 1) - 2;
-        text(b, &r6, rx, y, 1, c(YELLOW), 0.35);
-        rx
-    };
+    // The score is the only bright thing on this row, and it lifts whenever it
+    // moves.
+    let score = s.score.to_string();
+    let live = c(WHITE).mul(1.0 + s.hot);
+    text(b, &score, 2, y, 1, live, 0.25 + s.hot);
+    let mut x = 2 + text_w(&score, 1) + 6;
 
-    // The middle slot carries the game's name, and gives it up whenever the
-    // game has something to shout. A machine talks to you from its status
-    // strip; a banner floating over the playfield is a modern habit, and at
-    // most sizes there is nowhere to put one that does not collide.
-    let mid = l.w as i32 / 2;
-    let lw = if labelled {
-        text_w(&left, 1)
-    } else {
-        text_w("000000", 1)
-    };
-    let free = rx - (2 + lw) - 6;
-    match shout {
-        Some((word, life)) if text_w(word, 1) <= free => {
-            let fade = (life * 1.8).min(1.0);
-            let col = c(WHITE).lerp(c(YELLOW), 1.0 - life).mul(fade);
-            text(b, word, mid - text_w(word, 1) / 2, y, 1, col, 1.0 * fade);
-        }
-        _ if text_w(name, 1) <= free => {
-            text(b, name, mid - text_w(name, 1) / 2, y, 1, c(STEEL), 0.0);
-        }
-        _ => {}
+    if let Some((word, life)) = s.shout.filter(|(_, life)| *life > 0.0) {
+        let fade = (life * 1.8).min(1.0);
+        let col = c(WHITE).lerp(c(YELLOW), 1.0 - life).mul(fade);
+        text(b, word, x, y, 1, col, 1.0 * fade);
+        x += text_w(word, 1) + 6;
     }
+
+    let right_x = l.w as i32 - text_w(s.right, 1) - 2;
+    if !s.left.is_empty() {
+        let budget = (((right_x - x - 4) / 4).max(0)) as usize;
+        let cut: String = s.left.chars().take(budget).collect();
+        text(b, &cut, x, y, 1, dim, 0.0);
+    }
+    text(b, s.right, right_x, y, 1, dim, 0.0);
 }
 
 /// The rule under the strip, doubling as the wrapped command's progress bar.
@@ -311,19 +283,6 @@ pub fn rule(b: &mut Buf, l: &Layout, progress: Option<f32>) {
             put_base(b, x, y, c(IRON));
         }
     }
-}
-
-/// Row H-1: the wrapped command's last line at the left, the clock at the
-/// right. Dim, never bloomed — it is the one thing on screen that is not
-/// asking to be looked at.
-pub fn ticker(b: &mut Buf, l: &Layout, left: &str, right: &str) {
-    let Some(y) = l.ticker_sub else { return };
-    let y = y as i32;
-    let dim = c(STEEL).mul(0.75);
-    let budget = (((l.w as i32 - text_w(right, 1) - 8) / 4).max(0)) as usize;
-    let s: String = left.chars().take(budget).collect();
-    text(b, &s, 2, y, 1, dim, 0.0);
-    text(b, right, l.w as i32 - text_w(right, 1) - 2, y, 1, dim, 0.0);
 }
 
 // ------------------------------------------------------------ side columns

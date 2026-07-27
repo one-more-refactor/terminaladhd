@@ -68,9 +68,6 @@ const JOLT_FLOOR: f32 = 0.55;
 const TEAR_FLOOR: f32 = 0.8;
 const SYNC_FRAMES: u32 = 7;
 
-/// How fast the `1UP` marker alternates, in frames.
-const BLINK_FRAMES: u32 = 24;
-
 /// How long the attract loop holds each of its screens. A cabinet left alone
 /// did not show one picture — it cycled the marquee, the board and a demo, and
 /// that cycle is most of why an idle machine still looked alive from across the
@@ -104,8 +101,11 @@ pub trait Host {
 pub struct Forever;
 
 impl Host for Forever {
+    /// Nothing. There is no command, so there is nothing to report, and a line
+    /// of instructions along the bottom of a game is the sort of thing that is
+    /// read once and then in the way forever.
     fn status(&mut self) -> String {
-        "INSERT COIN - ENTER TO PLAY - ESC TO QUIT".to_string()
+        String::new()
     }
 }
 
@@ -406,8 +406,6 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             negative -= 1;
         }
 
-        let blink = (frame_no / BLINK_FRAMES).is_multiple_of(2);
-        let best = scores.best(kind);
         let right = clock(played);
         let tick = Tick {
             left: host.status(),
@@ -439,16 +437,16 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                 let idle = since.elapsed().as_secs_f32();
                 let t = frame_no as f32 * STEP.as_secs_f32();
                 if ((idle / ATTRACT_CYCLE) as u32).is_multiple_of(2) {
-                    stage.attract(demo.as_ref(), scores.best(demo_kind), blink, t, &teach);
+                    stage.attract(demo.as_ref(), scores.best(demo_kind), t, &teach);
                 } else {
                     // The board the demo is playing for, so the two halves of
                     // the loop are about the same game.
                     let rows = scores.top(demo_kind);
-                    stage.board(demo_kind, &rows, None, idle, scores.best(demo_kind), &teach);
+                    stage.board(demo_kind, &rows, None, idle, &teach);
                 }
             }
             Mode::Coin { age, .. } => {
-                stage.coin(demo.as_ref(), *age, scores.best(demo_kind), &tick)
+                stage.coin(demo.as_ref(), *age, &tick)
             }
             Mode::Spin { reel, age } => {
                 let t = (age / SPIN_TIME.as_secs_f32()).clamp(0.0, 1.0);
@@ -457,11 +455,11 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                 // whole difference between a wheel and a fade.
                 let travel = 1.0 - (1.0 - t).powi(5);
                 stage.slam = (stage.slam - 0.12).max(0.0);
-                stage.spin(reel, travel, best, blink, &tick);
+                stage.spin(reel, travel, &tick);
             }
-            Mode::Play => stage.game(game.as_ref(), best, blink, &tick),
-            Mode::Paused => stage.paused(game.as_ref(), best, blink, &tick),
-            Mode::Help { .. } => stage.help(kind, best, &tick),
+            Mode::Play => stage.game(game.as_ref(), &tick),
+            Mode::Paused => stage.paused(game.as_ref(), &tick),
+            Mode::Help { .. } => stage.help(kind, &tick),
             Mode::Over { age, score, rank } => {
                 let settle = Settle {
                     fade: (age / SINK_TIME).clamp(0.0, 1.0),
@@ -469,11 +467,11 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                     record: *rank == Some(0),
                     tally: game.tally(),
                 };
-                stage.over(game.as_ref(), &settle, best, blink, &tick);
+                stage.over(game.as_ref(), &settle, &tick);
             }
             Mode::Board { age, rank } => {
                 let rows = scores.top(kind);
-                stage.board(kind, &rows, *rank, *age, best, &tick);
+                stage.board(kind, &rows, *rank, *age, &tick);
             }
         }
 

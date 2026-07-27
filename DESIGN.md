@@ -245,11 +245,17 @@ exponential and has no floor, and this machine hands out a level on the clock
 whether or not anyone is clearing lines. Carried three minutes it passed twenty
 rows a frame, so a long build ended in a board nobody could have played.
 
-There is a floor now, at 60 ms a row, reached at about two and a half minutes.
-It is brutal and still human, because a grounded piece keeps its full
-500 ms lock window whatever gravity is doing — the floor governs how long you
-have to think, not how long you have to place. The curve runs 355 ms at the
-start, 190 at a minute, 135 at ninety seconds, and settles.
+The shape was wrong as well as unbounded. The Guideline curve is built for a
+marathon — gentle for a long time and then a wall — and this is two minutes
+while a build runs. It opened too slowly to be interesting and arrived at
+something unplayable with very little in between, which is exactly what "too
+easy at the start and too hard too soon" describes.
+
+It is a geometric fall now: 300 ms at the opening, giving up a fixed share of
+what is left every level, settling at 100 ms. The early steps are large and
+felt, the late ones are small, and the end is somewhere a person can keep
+playing — so dying is something the player did rather than something the clock
+did. A grounded piece still keeps its full 500 ms lock window on top of that.
 
 ## Things come apart
 
@@ -408,6 +414,27 @@ Ordering in the chain is not arbitrary. The flash is light arriving at the
 glass, so it is first. The guns are behind the glass, so the fringe is next. Hum
 and vignette are properties of the tube. The shake moves the whole chassis. The
 collapse is the power going, and it happens to whatever the screen was showing.
+
+## One row of chrome
+
+The play screen carried a bar across the top with a `1UP` marker, the live
+score, the game's name and the all-time best; a second row under the well for
+readings; and a third at the bottom for the wrapped command. Three rows of
+furniture around a game is a dashboard.
+
+Every one of those had an answer. The marker says nothing. The name is answered
+by looking at the game. The record belongs on the screen where records are read,
+which is the attract loop and the board. And the readings the player is not
+using while playing belong on the screen they read afterwards.
+
+So there is one row now, at the bottom: the score at the left in white, whatever
+the game has to shout beside it, the command's last line dim after that, and the
+clock at the right. The standalone arcade says nothing at all there — a line of
+instructions along the bottom of a game is read once and then in the way
+forever.
+
+What still touches the well is what you play with: the hold slot, the queue, and
+snake's multiplier.
 
 ## What a frame costs
 

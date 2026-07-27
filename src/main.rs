@@ -124,18 +124,18 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     }
 
     let demo = play(Kind::Snake, 0);
-    stage.attract(demo.as_ref(), 9200, true, 0.0, &tick);
+    stage.attract(demo.as_ref(), 9200, 0.0, &tick);
     dump(&stage, "attract")?;
 
-    stage.coin(demo.as_ref(), 0.1, 9200, &tick);
+    stage.coin(demo.as_ref(), 0.1, &tick);
     dump(&stage, "coin")?;
 
-    stage.spin(&[Kind::Tetris, Kind::Snake, Kind::Tetris], 0.68, 9200, true, &tick);
+    stage.spin(&[Kind::Tetris, Kind::Snake, Kind::Tetris], 0.68, &tick);
     dump(&stage, "spin")?;
 
     // The frame the wheel stops on, with the winner doubled off itself.
     stage.slam = 1.0;
-    stage.spin(&[Kind::Snake, Kind::Tetris, Kind::Snake], 1.0, 9200, true, &tick);
+    stage.spin(&[Kind::Snake, Kind::Tetris, Kind::Snake], 1.0, &tick);
     dump(&stage, "land")?;
     stage.slam = 0.0;
 
@@ -144,7 +144,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     let mid = play(Kind::Tetris, 400);
     for (name, t) in [("cut-early", 0.30f32), ("cut-late", 0.72)] {
         stage.curtain = t;
-        stage.game(mid.as_ref(), 9200, true, &tick);
+        stage.game(mid.as_ref(), &tick);
         dump(&stage, name)?;
     }
     stage.curtain = 0.0;
@@ -152,7 +152,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     // The same frame at the tolerance a metered link gets, for judging what
     // the saving actually costs to look at.
     stage.quality = terminaladhd::stage::Quality::lean();
-    stage.game(mid.as_ref(), 9200, true, &tick);
+    stage.game(mid.as_ref(), &tick);
     dump(&stage, "lean")?;
     stage.quality = terminaladhd::stage::Quality::full();
 
@@ -166,7 +166,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
         for _ in 0..5 {
             g.step(&Input::default(), Duration::from_millis(16));
         }
-        stage.game(&g, 9200, true, &tick);
+        stage.game(&g, &tick);
         dump(&stage, "sparks")?;
     }
 
@@ -187,7 +187,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
             Duration::from_millis(16),
         );
         g.step(&Input::default(), Duration::from_millis(16));
-        stage.game(&g, 9200, true, &tick);
+        stage.game(&g, &tick);
         dump(&stage, "motion")?;
     }
 
@@ -198,20 +198,20 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
         terminaladhd::world::hex(0xFFFFFF),
     );
     for i in 0..4 {
-        stage.game(mid.as_ref(), 9200, true, &tick);
+        stage.game(mid.as_ref(), &tick);
         dump(&stage, &format!("huge-{i}"))?;
     }
 
-    stage.help(Kind::Tetris, 9200, &tick);
+    stage.help(Kind::Tetris, &tick);
     dump(&stage, "help")?;
 
-    stage.paused(mid.as_ref(), 9200, true, &tick);
+    stage.paused(mid.as_ref(), &tick);
     dump(&stage, "paused")?;
 
     stage.tear = 9.0;
     stage.fringe = 6.0;
     stage.jolt = (2, 2);
-    stage.game(mid.as_ref(), 9200, true, &tick);
+    stage.game(mid.as_ref(), &tick);
     dump(&stage, "hit")?;
 
     for kind in ALL {
@@ -220,7 +220,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
         // marker in the air rather than a board at rest.
         let game = play(kind, 900);
 
-        stage.game(game.as_ref(), 9200, true, &tick);
+        stage.game(game.as_ref(), &tick);
         dump(&stage, kind.slug())?;
 
         stage.over(
@@ -231,8 +231,6 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
                 record: true,
                 tally: game.tally(),
             },
-            9200,
-            true,
             &tick,
         );
         dump(&stage, &format!("{}-over", kind.slug()))?;
@@ -245,7 +243,7 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
                 at: 1_700_000_000 + i as u64,
             })
             .collect();
-        stage.board(kind, &rows, Some(2), 0.1, 9200, &tick);
+        stage.board(kind, &rows, Some(2), 0.1, &tick);
         dump(&stage, &format!("{}-board", kind.slug()))?;
     }
 
@@ -272,9 +270,9 @@ fn play(kind: terminaladhd::games::Kind, steps: u32) -> Box<dyn terminaladhd::ga
         // the air: a still of a board at rest says nothing about how the game
         // pays out.
         if i > steps / 2 && !game.pops().is_empty() {
-            // A few frames past the hit, so the still shows the game rather
-            // than the frame the game happened to be inverted on.
-            for _ in 0..5 {
+            // Well past the hit, so the still shows the game rather than the
+            // frames the screen happened to be reacting on.
+            for _ in 0..14 {
                 let input = game.autopilot();
                 game.step(&input, Duration::from_millis(16));
             }
@@ -317,7 +315,7 @@ fn bench(w: usize, h: usize) -> Result<()> {
             let input = game.autopilot();
             game.step(&input, Duration::from_millis(16));
             stage.animate(0.016, game.heat());
-            stage.game(game.as_ref(), 9200, true, &tick);
+            stage.game(game.as_ref(), &tick);
             enc_diff(&stage.cells, &prev, w, h, q.tol, 6, &mut out);
             total += out.len();
             prev.copy_from_slice(&stage.cells);

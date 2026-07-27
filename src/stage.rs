@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use crate::games::{Game, Kind};
 use crate::scores::Entry;
-use crate::world::cabinet::{ground, pop, rule, strip, ticker, Strip};
+use crate::world::cabinet::{ground, pop, rule, strip, Strip};
 use crate::world::draw::{lit, ring, text, text_center, text_w};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
@@ -384,7 +384,7 @@ impl Stage {
 
     /// Attract: the marquee over the machine playing itself. A cabinet was
     /// never idle — it demoed, and the demo is what got the coin out of you.
-    pub fn attract(&mut self, demo: &dyn Game, best: u32, blink: bool, t: f32, tick: &Tick) {
+    pub fn attract(&mut self, demo: &dyn Game, best: u32, t: f32, tick: &Tick) {
         self.open(demo.heat() * 0.5);
         // The demo gets its own arena — it may not be the game the stage is cut
         // for — and no side columns: a NEXT queue nobody can use is clutter
@@ -419,15 +419,27 @@ impl Stage {
         if (t * 1.6) as i32 % 2 == 0 {
             text_center(&mut self.buf, "PRESS ENTER", cx, mid as i32 + 8, 2, c(YELLOW), 1.2);
         }
-        text_center(&mut self.buf, "ESC TO QUIT", cx, mid as i32 + 22, 1, c(STEEL), 0.0);
-        self.close(0, best, demo.kind().name(), blink, tick);
+        // The record lives here and on the board, and nowhere else. It is not
+        // something you look at while playing.
+        if best > 0 {
+            text_center(
+                &mut self.buf,
+                &format!("BEST {best}"),
+                cx,
+                mid as i32 + 22,
+                1,
+                c(YELLOW),
+                0.4,
+            );
+        }
+        self.close(tick);
     }
 
     /// A credit going in. The marquee is still up and nothing has been decided
     /// yet — this is the half-second of the machine noticing, which every
     /// cabinet had and which is most of why putting a coin in felt like
     /// something.
-    pub fn coin(&mut self, demo: &dyn Game, age: f32, best: u32, tick: &Tick) {
+    pub fn coin(&mut self, demo: &dyn Game, age: f32, tick: &Tick) {
         self.open(0.4);
         let mut bare = demo.kind().layout(self.w, self.h);
         bare.left_col = None;
@@ -454,12 +466,12 @@ impl Stage {
                 c(WHITE).mul(1.0 - r),
             );
         }
-        self.close(0, best, "CREDIT", true, tick);
+        self.close(tick);
     }
 
     /// The roulette: names flying through the warp toward the player and
     /// slamming to a stop on the one that won.
-    pub fn spin(&mut self, reel: &[Kind], travel: f32, best: u32, blink: bool, tick: &Tick) {
+    pub fn spin(&mut self, reel: &[Kind], travel: f32, tick: &Tick) {
         // The wheel drives the field: it is the fastest thing this machine
         // does, and the background should be the first to say so.
         self.warp.punch(0.5 * (1.0 - travel));
@@ -508,16 +520,15 @@ impl Stage {
                 }
             }
         }
-        self.close(0, best, self.kind.name(), blink, tick);
+        self.close(tick);
     }
 
     /// A game, running.
-    pub fn game(&mut self, g: &dyn Game, best: u32, blink: bool, tick: &Tick) {
+    pub fn game(&mut self, g: &dyn Game, tick: &Tick) {
         self.open(g.heat());
         g.paint(&mut self.buf, &self.layout);
         self.feedback(g);
-        let shout = g.shout();
-        self.close_shouting(g.score(), best, self.kind.name(), blink, tick, shout);
+        self.close_playing(g, tick);
     }
 
     /// The score markers, drawn here rather than in either game so a Tetris and
@@ -531,7 +542,7 @@ impl Stage {
 
     /// The settle after a crash: the frozen game pulled down, a hero word over
     /// it, and the run's score counting up underneath.
-    pub fn over(&mut self, g: &dyn Game, s: &Settle, best: u32, blink: bool, tick: &Tick) {
+    pub fn over(&mut self, g: &dyn Game, s: &Settle, tick: &Tick) {
         self.open(g.heat());
         g.paint(&mut self.buf, &self.layout);
         // The picture goes down so the words can come up. It happens to the
@@ -560,13 +571,13 @@ impl Stage {
                 .join("   ");
             text_center(&mut self.buf, &line, cx, mid as i32 + 20, 1, c(STEEL), 0.0);
         }
-        self.close(s.shown, best, self.kind.name(), blink, tick);
+        self.close(tick);
     }
 
     /// The clock stopped. The game stays on screen behind a half-collapsed
     /// raster — the picture is visibly held rather than replaced, so it is
     /// obvious nothing has been lost.
-    pub fn paused(&mut self, g: &dyn Game, best: u32, blink: bool, tick: &Tick) {
+    pub fn paused(&mut self, g: &dyn Game, tick: &Tick) {
         self.open(0.0);
         g.paint(&mut self.buf, &self.layout);
         self.dim_all(0.35);
@@ -574,7 +585,7 @@ impl Stage {
         let mid = self.layout.h as f32;
         let scale = hero_scale("PAUSED", self.layout.w, 3);
         chrome_word(&mut self.buf, "PAUSED", scale, self.layout.w as f32 * 0.5, mid);
-        if blink {
+        {
             text_center(
                 &mut self.buf,
                 "P TO RESUME",
@@ -585,12 +596,12 @@ impl Stage {
                 0.0,
             );
         }
-        self.close(g.score(), best, self.kind.name(), blink, tick);
+        self.close(tick);
     }
 
     /// The controls, on their own screen. Every machine had this printed on the
     /// bezel; this one has nowhere to print it.
-    pub fn help(&mut self, kind: Kind, best: u32, tick: &Tick) {
+    pub fn help(&mut self, kind: Kind, tick: &Tick) {
         self.open(0.1);
         let cx = self.layout.w as i32 / 2;
         let scale = hero_scale("CONTROLS", self.layout.w, 2);
@@ -634,7 +645,7 @@ impl Stage {
             c(CYAN),
             0.4,
         );
-        self.close(0, best, kind.name(), true, tick);
+        self.close(tick);
     }
 
     /// The frame is smaller than the machine can draw. Says so, in the only
@@ -664,7 +675,6 @@ impl Stage {
         rows: &[Entry],
         hilite: Option<usize>,
         age: f32,
-        best: u32,
         tick: &Tick,
     ) {
         self.open(0.15);
@@ -705,7 +715,7 @@ impl Stage {
             let x = cx - text_w(&line, 1) / 2;
             text(&mut self.buf, &line, x, y, 1, hue, if new { 1.2 } else { 0.2 });
         }
-        self.close(0, best, kind.name(), true, tick);
+        self.close(tick);
     }
 
     // ------------------------------------------------------------- plumbing
@@ -720,39 +730,36 @@ impl Stage {
 
     /// Strip, rule, ticker, post, resolve — the same tail on every screen, so
     /// the chrome never flickers between two of them.
-    fn close(&mut self, score: u32, best: u32, name: &str, blink: bool, tick: &Tick) {
-        self.close_shouting(score, best, name, blink, tick, None);
+    /// The one row of chrome, then post and resolve. Every screen ends here.
+    fn close(&mut self, tick: &Tick) {
+        self.close_with(0, None, tick);
     }
 
-    fn close_shouting(
-        &mut self,
-        score: u32,
-        best: u32,
-        name: &str,
-        blink: bool,
-        tick: &Tick,
-        shout: Option<(&str, f32)>,
-    ) {
+    /// [`Stage::close`] with a game's score and whatever it has to shout.
+    fn close_playing(&mut self, g: &dyn Game, tick: &Tick) {
+        let shout = g.shout();
+        self.close_with(g.score(), shout, tick);
+    }
+
+    fn close_with(&mut self, score: u32, shout: Option<(&str, f32)>, tick: &Tick) {
         if score != self.shown_score {
             self.shown_score = score;
             self.score_hot = 1.0;
         }
         let hot = self.score_hot;
         self.score_hot = (self.score_hot - 0.14).max(0.0);
+        rule(&mut self.buf, &self.layout, self.progress);
         strip(
             &mut self.buf,
             &self.layout,
             &Strip {
                 score,
-                best,
-                name,
-                blink,
                 shout,
+                left: &tick.left,
+                right: &tick.right,
                 hot,
             },
         );
-        rule(&mut self.buf, &self.layout, self.progress);
-        ticker(&mut self.buf, &self.layout, &tick.left, &tick.right);
         self.post();
         self.resolve();
     }

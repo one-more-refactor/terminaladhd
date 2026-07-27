@@ -36,24 +36,20 @@ const NEXT_SHOWN: usize = 5;
 const LINES_PER_LEVEL: u32 = 5;
 const LEVEL_TIME_SECS: u64 = 25;
 
-/// The fastest a piece is ever allowed to fall, in seconds per row.
+/// The gravity curve, as a geometric fall from an opening pace to a floor.
 ///
-/// The Guideline curve is exponential and has no floor: carried far enough it
-/// passes twenty rows a frame and the game stops being playable at all. That
-/// matters here more than it does in a marathon, because the clock hands out
-/// levels whether or not anyone is clearing lines, and a build that runs three
-/// minutes would otherwise end in a board nobody could have played. Fifty
-/// milliseconds a row is brutal and still human, because a grounded piece gets
-/// a five-hundred-millisecond lock window whatever gravity is doing — the floor
-/// governs how long you have to think, not how long you have to place.
+/// The Guideline curve was the wrong shape for this. It is built for a marathon
+/// — gentle for a long time, then unplayable — and this is two minutes while a
+/// build runs. It opened too slowly to be interesting and arrived at a wall
+/// with nothing in between.
 ///
-/// Reached at about two and a half minutes, which is a long build.
-const FALL_FLOOR: f32 = 0.06;
-
-/// The gravity curve is offset so play opens at Guideline level 5 (≈0.35 s/row)
-/// rather than the one-row-a-second of level 1. A cabinet did not open slow, and
-/// this is a machine you are at for two minutes, not two hours.
-const GRAVITY_LEVEL_OFFSET: u32 = 4;
+/// This one opens brisk enough to be a game from the first piece, gives up a
+/// fixed share of what is left every level so the early steps are felt and the
+/// late ones are not, and settles somewhere a person can keep playing. Dying is
+/// then something the player did rather than something the clock did.
+const FALL_OPEN: f32 = 0.30;
+const FALL_REST: f32 = 0.10;
+const FALL_DECAY: f32 = 0.72;
 
 /// Spawn the piece two rows above the skyline; one step of gravity brings it
 /// into view. The buffer above the visible field is what makes this legal.
@@ -296,9 +292,8 @@ impl Tetris {
     /// Seconds a piece takes to fall one row under gravity, on the Guideline
     /// curve offset to open at level 4.
     pub fn fall_seconds(&self) -> f32 {
-        let l = (self.level() + GRAVITY_LEVEL_OFFSET) as f32;
-        let base = (0.8 - (l - 1.0) * 0.007).max(0.001);
-        base.powf(l - 1.0).max(FALL_FLOOR)
+        let steps = (self.level() - 1).min(40) as i32;
+        FALL_REST + (FALL_OPEN - FALL_REST) * FALL_DECAY.powi(steps)
     }
 
     // ------------------------------------------------------------ the clock
@@ -1289,22 +1284,25 @@ mod balance {
 
     #[test]
     fn the_curve_opens_playable_and_never_runs_away() {
-        // The opening has to be brisk without being a test of reflexes, and the
-        // end has to still be a game. Between those two the shape is the
-        // Guideline curve's business, not ours.
+        // Brisk enough to be a game from the first piece, and it settles
+        // somewhere a person can keep playing rather than at a wall. Between
+        // those two the shape is the decay's business.
         let open = at(0).fall_seconds();
         assert!(
-            (0.25..=0.45).contains(&open),
+            (0.25..=0.35).contains(&open),
             "opening gravity {open} is outside the playable band"
         );
         for secs in [0, 30, 60, 120, 300, 900] {
             let fall = at(secs).fall_seconds();
             assert!(
-                fall >= FALL_FLOOR,
-                "gravity ran away to {fall} at {secs}s — past the floor there is
-                 no game left to play"
+                fall >= FALL_REST,
+                "gravity ran past its floor to {fall} at {secs}s"
             );
         }
+        // And most of the way there inside the first two minutes, or the ramp
+        // is happening after the build has finished.
+        let bite = at(120).fall_seconds();
+        assert!(bite < 0.17, "still gentle at two minutes: {bite}");
     }
 
     #[test]
@@ -1319,11 +1317,11 @@ mod balance {
 
     #[test]
     fn a_long_build_still_leaves_a_game() {
-        // Three minutes is a long build. At the floor a piece still takes over
-        // a second to fall the well, and a grounded one keeps its full lock
-        // window whatever gravity is doing.
+        // Three minutes is a long build, and it has to still be a game rather
+        // than a countdown. At rest a piece takes two seconds to cross the
+        // well, and a grounded one keeps its full lock window on top of that.
         let fall = at(180).fall_seconds();
-        assert!(fall * VISIBLE as f32 > 1.0, "a piece crosses the well too fast");
+        assert!(fall * VISIBLE as f32 > 1.8, "a piece crosses the well too fast");
         assert!(handling::LOCK_DELAY >= Duration::from_millis(400));
     }
 }

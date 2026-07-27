@@ -27,11 +27,12 @@ impl Rect {
     }
 }
 
-/// Rows the chrome claims above and below the arena. The status face is five
-/// sub-rows and a cell is two, so the strip needs three rows to itself before
-/// the progress rule can have one — anything tighter and the rule is drawn
-/// through the score.
-const TOP_ROWS: usize = 3;
+/// Rows the chrome claims above and below the arena.
+///
+/// One at the top for the progress rule, three at the bottom for the single row
+/// of chrome. Everything that is not the game lives on that one row — three
+/// rows of readings around a well is a dashboard, and one is a cabinet.
+const TOP_ROWS: usize = 1;
 const BOTTOM_ROWS: usize = 3;
 
 /// The shortest frame that can still afford a ticker. Under this the arena and
@@ -87,7 +88,6 @@ pub struct Layout {
 
     /// Sub-rows, not rows: both of these are anchored inside a cell rather than
     /// on one, because a five-sub-row face does not fit a two-sub-row cell.
-    pub strip_sub: usize,
     pub rule_sub: usize,
     /// Where the ticker sits, or `None` on a frame too short to spare it.
     pub ticker_sub: Option<usize>,
@@ -182,8 +182,7 @@ impl Layout {
             cols,
             rows,
             arena,
-            strip_sub: 0,
-            rule_sub: 2 * TOP_ROWS - 1,
+            rule_sub: 1,
             // The ticker hangs off the bottom of the frame, which is the only
             // way a five-sub-row face fits the last row.
             ticker_sub,
