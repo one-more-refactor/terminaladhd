@@ -29,9 +29,15 @@ use crate::world::Warp;
 const BLOOM: (usize, usize, f32) = (4, 2, 0.60);
 /// How much darker every second sub-row is. A CRT hint, not a mask.
 const SCANLINE: f32 = 0.82;
-/// Colour-match tolerance when resolving sub-pixels to cells. 2/255 is below
-/// the perceptual floor and cuts the diff substantially.
-const TOL: i32 = 2;
+/// Colour-match tolerance when resolving sub-pixels to cells and when diffing
+/// them against the last frame, in 8-bit levels.
+///
+/// This is the single most expensive number in the machine. At 2 it is below
+/// the perceptual floor and every faint nudge of the warp field over the whole
+/// screen is a cell that has to be re-sent — which is most of the bytes leaving
+/// the process. Raising it throws away changes nobody can see anyway.
+const TOL_RICH: i32 = 2;
+const TOL_LEAN: i32 = 14;
 
 /// The wordmark on the marquee.
 pub const TITLE: &str = "ADHD";
@@ -69,10 +75,77 @@ pub struct Stage {
     torn: u64,
     /// Where the supply hum currently is, `0.0..=1.0` down the picture.
     hum: f32,
+    /// What this frame is allowed to spend.
+    pub quality: Quality,
     buf: Buf,
     px: Vec<Rgb>,
     scratch: Vec<Rgb>,
     pub cells: Vec<Cell>,
+}
+
+/// What the machine is allowed to spend on a frame.
+///
+/// Every one of these costs bytes down a wire, not just cycles. A phone on a
+/// cellular link is the case that makes that visible: the hum is a bright band
+/// crawling across the full width, so every row it touches is a row that has to
+/// be re-sent, and the warp field changes somewhere in almost every column of
+/// every frame. Locally they are free. Over SSH they are the whole bill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Quality {
+    pub warp: bool,
+    pub hum: bool,
+    pub fringe: bool,
+    pub vignette: bool,
+    pub bloom: bool,
+    pub scanlines: bool,
+    /// Colour-match tolerance, in 8-bit levels. The dial that actually governs
+    /// what a frame costs.
+    pub tol: i32,
+    /// Frames a second. The other half of the bill — halving it halves the
+    /// bytes, and neither of these games needs sixty.
+    pub fps: u32,
+}
+
+impl Quality {
+    /// Everything on. What a local terminal gets.
+    pub const fn full() -> Quality {
+        Quality {
+            warp: true,
+            hum: true,
+            fringe: true,
+            vignette: true,
+            bloom: true,
+            scanlines: true,
+            tol: TOL_RICH,
+            fps: 60,
+        }
+    }
+
+    /// What survives when bytes are expensive.
+    ///
+    /// Measured rather than guessed: at the strict tolerance the warp field is
+    /// ninety-three per cent of the bytes leaving this process, because its
+    /// faint light spread by bloom nudges almost every cell of every frame past
+    /// a two-level threshold. Raising the threshold to fourteen throws away
+    /// changes nobody can see and keeps the field, which is the whole identity
+    /// of the screen — a fifth of the cost for none of the look.
+    ///
+    /// The hum and the fringe go because they dirty cells nothing asked to
+    /// change: the hum sweeps the full width every frame, and the fringe
+    /// rewrites every column with contrast in it. Bloom and the vignette stay;
+    /// they only change when the picture under them does.
+    pub const fn lean() -> Quality {
+        Quality {
+            warp: true,
+            hum: false,
+            fringe: false,
+            vignette: true,
+            bloom: true,
+            scanlines: true,
+            tol: TOL_LEAN,
+            fps: 30,
+        }
+    }
 }
 
 /// The permanent misconvergence, in sub-pixels at the frame edge. Under one
@@ -99,6 +172,7 @@ impl Stage {
             invert: 0.0,
             torn: 0x9e3779b9,
             hum: 0.0,
+            quality: Quality::full(),
             buf: Buf::new(w, h),
             px: Vec::new(),
             scratch: Vec::new(),
@@ -348,8 +422,7 @@ impl Stage {
             c(STEEL),
             0.0,
         );
-        bloom(&mut self.buf, BLOOM.0, BLOOM.1, BLOOM.2, &mut self.px);
-        scanlines(&mut self.px, self.buf.w, self.buf.sh, SCANLINE);
+        self.post();
         self.resolve();
     }
 
@@ -378,7 +451,7 @@ impl Stage {
         // The table grows down from the title and must not reach the ticker; on
         // a short frame that means showing fewer places, never smaller ones.
         let first = top + 9;
-        let bottom = self.layout.ticker_sub as i32 - 6;
+        let bottom = self.layout.ticker_sub.unwrap_or(2 * self.layout.h) as i32 - 6;
         const PITCH: i32 = 8;
         let room = ((bottom - first) / PITCH).max(1) as usize;
 
@@ -409,7 +482,9 @@ impl Stage {
     /// Black ground and the warp behind everything.
     fn open(&mut self, heat: f32) {
         ground(&mut self.buf);
-        self.warp.draw(&mut self.buf, heat);
+        if self.quality.warp {
+            self.warp.draw(&mut self.buf, heat);
+        }
     }
 
     /// Strip, rule, ticker, post, resolve — the same tail on every screen, so
@@ -430,9 +505,21 @@ impl Stage {
         strip(&mut self.buf, &self.layout, score, name, best, blink, shout);
         rule(&mut self.buf, &self.layout, self.progress);
         ticker(&mut self.buf, &self.layout, &tick.left, &tick.right);
-        bloom(&mut self.buf, BLOOM.0, BLOOM.1, BLOOM.2, &mut self.px);
-        scanlines(&mut self.px, self.buf.w, self.buf.sh, SCANLINE);
+        self.post();
         self.resolve();
+    }
+
+    /// Bloom and scanlines, or the plain sum of the two planes when bloom is
+    /// off — the picture still has to be resolved either way.
+    fn post(&mut self) {
+        if self.quality.bloom {
+            bloom(&mut self.buf, BLOOM.0, BLOOM.1, BLOOM.2, &mut self.px);
+        } else {
+            crate::world::resolve_no_bloom(&self.buf, &mut self.px);
+        }
+        if self.quality.scanlines {
+            scanlines(&mut self.px, self.buf.w, self.buf.sh, SCANLINE);
+        }
     }
 
     /// Scale the whole scene, both planes, before bloom.
@@ -455,15 +542,17 @@ impl Stage {
         // frame that asked for it is a white screen nobody can explain.
         crt::invert(&mut self.px, std::mem::take(&mut self.invert));
         crt::flash(&mut self.px, std::mem::take(&mut self.flash));
-        crt::fringe(
-            &mut self.px,
-            &mut self.scratch,
-            w,
-            sh,
-            FRINGE_REST + std::mem::take(&mut self.fringe),
-        );
-        crt::hum(&mut self.px, w, sh, self.hum, HUM_STRENGTH);
-        crt::vignette(&mut self.px, w, sh);
+        let extra = std::mem::take(&mut self.fringe);
+        if self.quality.fringe || extra > 0.0 {
+            let rest = if self.quality.fringe { FRINGE_REST } else { 0.0 };
+            crt::fringe(&mut self.px, &mut self.scratch, w, sh, rest + extra);
+        }
+        if self.quality.hum {
+            crt::hum(&mut self.px, w, sh, self.hum, HUM_STRENGTH);
+        }
+        if self.quality.vignette {
+            crt::vignette(&mut self.px, w, sh);
+        }
         let (dx, dy) = std::mem::take(&mut self.jolt);
         crt::shake(&mut self.px, &mut self.scratch, w, sh, dx, dy);
         self.torn = self.torn.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -476,7 +565,7 @@ impl Stage {
             self.torn,
         );
         crt::collapse(&mut self.px, &mut self.scratch, w, sh, self.curtain);
-        resolve_d(&self.px, w, sh, TOL, true, &mut self.cells);
+        resolve_d(&self.px, w, sh, self.quality.tol, true, &mut self.cells);
     }
 
     pub fn sub_pixels(&self) -> (&[Rgb], usize, usize) {

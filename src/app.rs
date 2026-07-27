@@ -16,7 +16,7 @@ use anyhow::Result;
 use crate::games::{Game, Input, Kind, ALL};
 use crate::rng::Rng;
 use crate::scores::Table;
-use crate::stage::{clock, Settle, Stage, Tick};
+use crate::stage::{clock, Quality, Settle, Stage, Tick};
 use crate::term::{self, Keys};
 
 /// One sim step. ARR is one step, so the handling machine's real-millisecond
@@ -198,7 +198,7 @@ enum Mode {
     },
 }
 
-pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
+pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Result<Exit> {
     let _guard = term::Guard::enter()?;
 
     let mut rng = Rng::new();
@@ -206,8 +206,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
     let mut kind = pick(&mut rng, None);
 
     let mut stage = Stage::new(kind, w0, h0);
+    stage.quality = quality;
+    let frame_time = Duration::from_micros(1_000_000 / quality.fps.clamp(10, 120) as u64);
     let mut prev = vec![Default::default(); stage.w * stage.h];
-    let mut presenter = term::Presenter::new();
+    let mut presenter = term::Presenter::new(stage.quality.tol);
 
     let mut game = kind.spawn(Rng::new());
     // The attract screen shows a game playing itself, and it is never the one
@@ -240,6 +242,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
             if cw >= term::MIN_SIZE.0 && ch >= term::MIN_SIZE.1 && (cw != stage.w || ch != stage.h)
             {
                 stage = Stage::new(kind, cw, ch);
+                stage.quality = quality;
                 prev = vec![Default::default(); stage.w * stage.h];
                 term::clear()?;
             }
@@ -261,7 +264,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
             stage.too_small();
             presenter.frame(&stage.cells, &prev, stage.w, stage.h)?;
             prev.copy_from_slice(&stage.cells);
-            std::thread::sleep(STEP.saturating_sub(frame_start.elapsed()));
+            std::thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
             continue;
         }
 
@@ -439,7 +442,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         presenter.frame(&stage.cells, &prev, stage.w, stage.h)?;
         prev.copy_from_slice(&stage.cells);
 
-        std::thread::sleep(STEP.saturating_sub(frame_start.elapsed()));
+        std::thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
     };
 
     term::drain();

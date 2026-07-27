@@ -34,8 +34,19 @@ impl Rect {
 const TOP_ROWS: usize = 3;
 const BOTTOM_ROWS: usize = 3;
 
-/// Columns a side column needs to carry a piece preview and two readings.
-const SIDE_MIN: usize = 10;
+/// The shortest frame that can still afford a ticker. Under this the arena and
+/// the chrome want every row there is, and the command's output is what gives
+/// way — a phone held in portrait would otherwise get no game at all.
+const TICKER_FLOOR: usize = 26;
+
+/// One row kept under the arena for the sub-pixel its frame is drawn on.
+const FRAME_ROOM: usize = 1;
+
+/// Columns a side column needs. A folded reading is a two-letter label, a
+/// space and up to three digits — fifteen columns — plus the gap that hangs it
+/// off the arena. Below this the column cannot hold a reading without clipping
+/// it, and a clipped number is worse than no number.
+const SIDE_MIN: usize = 18;
 
 /// Sub-rows a column heading claims (label, air, hairline, air), a whole
 /// reading claims (a heading plus its value and a gap), and a folded reading
@@ -75,7 +86,8 @@ pub struct Layout {
     /// on one, because a five-sub-row face does not fit a two-sub-row cell.
     pub strip_sub: usize,
     pub rule_sub: usize,
-    pub ticker_sub: usize,
+    /// Where the ticker sits, or `None` on a frame too short to spare it.
+    pub ticker_sub: Option<usize>,
 
     /// Columns free either side of the arena. Below [`SIDE_MIN`] the side
     /// columns do not exist and a game must do without them.
@@ -101,7 +113,12 @@ impl Layout {
         // The biggest mino whose arena still clears the chrome rows and leaves
         // a side column on each flank. Nothing else competes for the space:
         // there is no scenery to protect, so the game takes what there is.
-        let body = h.saturating_sub(TOP_ROWS + BOTTOM_ROWS);
+        let ticker = h >= TICKER_FLOOR;
+        // Without a ticker the arena still cannot run to the last row: its
+        // frame is drawn a sub-pixel outside it, and that sub-pixel has to
+        // land somewhere.
+        let below = if ticker { BOTTOM_ROWS } else { FRAME_ROOM };
+        let body = h.saturating_sub(TOP_ROWS + below);
         let mino_px = MINO_SIZES
             .into_iter()
             .find(|&p| rows * p / 2 <= body && cols * p + 2 * SIDE_MIN <= w)
@@ -138,8 +155,10 @@ impl Layout {
         // On a short frame the readings fold onto single lines before the queue
         // is cut to nothing: a NEXT of one piece is a worse game than a LEVEL
         // without its own heading.
-        let ticker_sub = 2 * h.saturating_sub(3);
-        let column_sub = ticker_sub.saturating_sub(2 * arena.y0);
+        // Without a ticker the column runs to the bottom of the frame.
+        let ticker_sub = ticker.then(|| 2 * h.saturating_sub(3));
+        let floor_sub = ticker_sub.unwrap_or(2 * h);
+        let column_sub = floor_sub.saturating_sub(2 * arena.y0);
         let full_foot = HEAD_SUB + COLUMN_GAP + 2 * READOUT_SUB;
         let compact_readouts = column_sub < full_foot + (mino_px + 2);
         let foot = if compact_readouts {
@@ -204,6 +223,10 @@ mod tests {
     fn sizes() -> Vec<(usize, usize)> {
         vec![
             MIN_SIZE,
+            // A phone in a terminal app: portrait, then landscape.
+            (60, 24),
+            (64, 24),
+            (80, 25),
             (100, 30),
             (120, 30),
             (160, 44),
@@ -214,15 +237,40 @@ mod tests {
     }
 
     #[test]
+    fn the_arenas_own_frame_fits_too() {
+        // The vector rectangle is drawn a sub-pixel outside the arena on every
+        // side. Off-by-one here is a border that is simply missing.
+        for kind in ALL {
+            for (w, h) in sizes() {
+                let l = kind.layout(w, h);
+                let (x0, y0, x1, y1) = l.arena_sub(0);
+                assert!(x0 > 0, "{kind:?} {w}x{h}: left border off-frame");
+                assert!(y0 > 0, "{kind:?} {w}x{h}: top border off-frame");
+                assert!(
+                    (x1 + 1) < w as i32,
+                    "{kind:?} {w}x{h}: right border off-frame"
+                );
+                assert!(
+                    (y1 + 1) < 2 * h as i32,
+                    "{kind:?} {w}x{h}: bottom border off-frame"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_arena_never_leaves_the_frame() {
         for kind in ALL {
             for (w, h) in sizes() {
                 let l = kind.layout(w, h);
                 assert!(l.arena.x1 < w, "{kind:?} {w}x{h}: arena runs off the side");
-                assert!(
-                    2 * (l.arena.y1 + 1) <= l.ticker_sub,
-                    "{kind:?} {w}x{h}: arena reaches the ticker"
-                );
+                if let Some(t) = l.ticker_sub {
+                    assert!(
+                        2 * (l.arena.y1 + 1) <= t,
+                        "{kind:?} {w}x{h}: arena reaches the ticker"
+                    );
+                }
+                assert!(l.arena.y1 < h, "{kind:?} {w}x{h}: arena leaves the frame");
                 assert!(
                     2 * l.arena.y0 > l.rule_sub,
                     "{kind:?} {w}x{h}: arena covers the strip"
@@ -282,11 +330,11 @@ mod tests {
                     READOUT_SUB
                 };
                 let used = HEAD_SUB + l.next_deep * (l.mino_px + 2) + COLUMN_GAP + 2 * each;
+                let floor = l.ticker_sub.unwrap_or(2 * h);
                 assert!(
-                    2 * y + used <= l.ticker_sub,
-                    "{kind:?} {w}x{h}: column ends at {} past ticker {}",
-                    2 * y + used,
-                    l.ticker_sub
+                    2 * y + used <= floor,
+                    "{kind:?} {w}x{h}: column ends at {} past {floor}",
+                    2 * y + used
                 );
                 assert!(x < w, "{kind:?} {w}x{h}: column starts off-frame");
             }

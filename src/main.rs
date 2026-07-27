@@ -15,6 +15,7 @@ use std::process::ExitCode;
 use anyhow::{bail, Result};
 
 use terminaladhd::app::{self, Exit, Forever};
+use terminaladhd::stage::Quality;
 use terminaladhd::term;
 use terminaladhd::wrap::{split_argv, Command};
 
@@ -31,6 +32,11 @@ shows you where the run placed, and starts the next one. Needs 80x26.
 keys: arrows or hjkl steer, x or up rotates, z counter-rotates,
       space hard drops, c holds, esc leaves the game then quits
 
+  --lean / --rich       force the low-bandwidth or the full renderer.
+                        Over SSH lean is the default: it is a fifth of the
+                        bytes and half the frames, for the same picture.
+  --bench               report what a frame costs down a wire
+
 env:  ADHD_SCORES        where the high-score table lives
                          (default $XDG_DATA_HOME/terminaladhd/scores)";
 
@@ -39,6 +45,8 @@ struct Args {
     command: Option<Vec<String>>,
     help: bool,
     shot: Option<String>,
+    bench: bool,
+    lean: Option<bool>,
 }
 
 fn parse(argv: Vec<String>) -> Result<Args> {
@@ -48,6 +56,8 @@ fn parse(argv: Vec<String>) -> Result<Args> {
         command,
         help: false,
         shot: None,
+        bench: false,
+        lean: None,
     };
     let mut it = ours.into_iter();
     while let Some(a) = it.next() {
@@ -62,6 +72,9 @@ fn parse(argv: Vec<String>) -> Result<Args> {
             "--shot" => {
                 out.shot = Some(it.next().ok_or_else(|| anyhow::anyhow!("--shot needs a dir"))?);
             }
+            "--bench" => out.bench = true,
+            "--lean" => out.lean = Some(true),
+            "--rich" => out.lean = Some(false),
             "-h" | "--help" => out.help = true,
             "-V" | "--version" => {
                 println!("adhd {}", env!("CARGO_PKG_VERSION"));
@@ -124,6 +137,13 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
         dump(&stage, name)?;
     }
     stage.curtain = 0.0;
+
+    // The same frame at the tolerance a metered link gets, for judging what
+    // the saving actually costs to look at.
+    stage.quality = terminaladhd::stage::Quality::lean();
+    stage.game(mid.as_ref(), 9200, true, &tick);
+    dump(&stage, "lean")?;
+    stage.quality = terminaladhd::stage::Quality::full();
 
     // The loudest frame the machine has: hold lost, guns apart, chassis moved.
     stage.help(Kind::Tetris, 9200, &tick);
@@ -201,6 +221,86 @@ fn play(kind: terminaladhd::games::Kind, steps: u32) -> Box<dyn terminaladhd::ga
     game
 }
 
+/// What a frame costs down a wire, and what each pass costs of that.
+///
+/// The number that matters is bytes per second, not per frame: a link that can
+/// carry the picture at sixty frames cannot necessarily carry it at all, and
+/// the only honest way to find out is to encode real frames of a real game and
+/// count the diff.
+fn bench(w: usize, h: usize) -> Result<()> {
+    use std::time::{Duration, Instant};
+    use terminaladhd::games::Kind;
+    use terminaladhd::stage::{Quality, Stage, Tick};
+    use terminaladhd::world::{enc_diff, Cell};
+
+    const FRAMES: usize = 300;
+    let tick = Tick {
+        left: "COMPILING TERMINALADHD V0.1.0".into(),
+        right: "1:07".into(),
+    };
+
+    let measure = |kind: Kind, q: Quality| -> (usize, f64, f64) {
+        let mut stage = Stage::new(kind, w, h);
+        stage.quality = q;
+        let mut game = kind.spawn(terminaladhd::rng::Rng::from_seed(7));
+        let mut prev: Vec<Cell> = vec![Default::default(); w * h];
+        let mut out: Vec<u8> = Vec::new();
+        let mut total = 0usize;
+        let started = Instant::now();
+        for _ in 0..FRAMES {
+            if game.is_over() {
+                game = kind.spawn(terminaladhd::rng::Rng::from_seed(7));
+            }
+            let input = game.autopilot();
+            game.step(&input, Duration::from_millis(16));
+            stage.animate(0.016, game.heat());
+            stage.game(game.as_ref(), 9200, true, &tick);
+            enc_diff(&stage.cells, &prev, w, h, q.tol, 6, &mut out);
+            total += out.len();
+            prev.copy_from_slice(&stage.cells);
+        }
+        let cpu_ms = started.elapsed().as_secs_f64() * 1000.0 / FRAMES as f64;
+        (total / FRAMES, total as f64 * 60.0 / FRAMES as f64, cpu_ms)
+    };
+
+    println!("terminaladhd bench — {w}x{h}, {FRAMES} frames of real play
+");
+    println!("{:<26} {:>10} {:>12} {:>9}", "", "bytes/frame", "KB/s at 60", "ms/frame");
+
+    let full = Quality::full();
+    let variants: [(&str, Quality); 9] = [
+        ("full", full),
+        ("full, no warp", Quality { warp: false, ..full }),
+        ("full, no hum", Quality { hum: false, ..full }),
+        ("full, no fringe", Quality { fringe: false, ..full }),
+        ("full, no bloom", Quality { bloom: false, ..full }),
+        ("full, tol 6", Quality { tol: 6, ..full }),
+        ("full, tol 14", Quality { tol: 14, ..full }),
+        ("full, tol 24", Quality { tol: 24, ..full }),
+        ("lean", Quality::lean()),
+    ];
+    for kind in [Kind::Tetris, Kind::Snake] {
+        println!("\n  {}", kind.name());
+        for (name, q) in variants {
+            let (per, rate, cpu) = measure(kind, q);
+            println!(
+                "  {:<24} {:>10} {:>12.0} {:>9.2}",
+                name,
+                per,
+                rate / 1024.0,
+                cpu
+            );
+        }
+    }
+    println!(
+        "\nA cell costs up to 40 bytes: two truecolor SGRs and a three-byte glyph.\n\
+         {} cells on this frame, so a full repaint is {} KB.",
+        w * h,
+        w * h * 40 / 1024
+    );
+    Ok(())
+}
+
 fn run() -> Result<i32> {
     let args = parse(std::env::args().skip(1).collect())?;
     if args.help {
@@ -221,11 +321,26 @@ fn run() -> Result<i32> {
         return shots(&dir, w, h).map(|_| 0);
     }
 
+    if args.bench {
+        return bench(w, h).map(|_| 0);
+    }
+
+    // Over SSH every frame is bytes on a wire, and on a phone it may be bytes
+    // on a cellular plan. Measured on a 120x34 frame: 498 KB/s rich, 54 KB/s
+    // lean. Nobody should have to know that before it is usable, so the default
+    // follows the link.
+    let quality = match args.lean {
+        Some(true) => Quality::lean(),
+        Some(false) => Quality::full(),
+        None if term::remote() => Quality::lean(),
+        None => Quality::full(),
+    };
+
     let Some(argv) = args.command else {
         if !term::attached() {
             bail!("no terminal on stderr; there is nothing to play on");
         }
-        app::run(&mut Forever, w, h)?;
+        app::run(&mut Forever, w, h, quality)?;
         return Ok(0);
     };
 
@@ -246,7 +361,7 @@ fn run() -> Result<i32> {
         return Ok(code);
     }
 
-    let exit = app::run(&mut cmd, w, h)?;
+    let exit = app::run(&mut cmd, w, h, quality)?;
 
     // The player leaving is not the command leaving: keep waiting, quietly, so
     // the exit code we hand back is always the command's own.

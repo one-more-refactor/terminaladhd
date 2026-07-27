@@ -117,6 +117,27 @@ repaint or corrupt the screen.
 | any key | skip the ceremony after a run |
 | `esc` | leave the game; again to quit |
 
+## Over SSH, and on a phone
+
+Every frame is bytes on a wire. `adhd --bench` measures it: on a 120×34 frame
+the full renderer is about 500 KB/s, and almost all of that is the warp field —
+faint light that bloom spreads over nearly every cell, which a strict
+colour-match then calls a change.
+
+`--lean` stops re-sending changes nobody can see. Same picture, a fifth of the
+bytes, thirty frames instead of sixty. It is the **default whenever
+`SSH_CONNECTION` is set**, so a phone gets it without being told; `--rich`
+forces the full renderer back on.
+
+```
+601 KB/s   local, full
+ 90 KB/s   over SSH, lean
+```
+
+It needs 60×24, so a terminal app in landscape is comfortable and portrait
+works if the font is small enough. Add `-C` to your `ssh` command and the ANSI
+compresses well on top of all this.
+
 ## Building
 
 ```
@@ -124,10 +145,11 @@ cargo build --release
 ./target/release/adhd
 ```
 
-`DESIGN.md` is the long version: why the screen is shaped this way, what was
-tried and thrown away, and what it would take to add a third game.
+No system dependencies. `--size WxH` forces a size, `--bench` reports what a
+frame costs, and `--shot DIR` dumps every screen — attract, spin, both games,
+game over, the board — as PPM, for reviewing a rendering change without a
+terminal in the way.
 
-No system dependencies. Needs at least 80×26 — a twenty-row playfield plus the
-strip and the ticker. `--size WxH` forces a size, and `--shot DIR` dumps every
-screen — attract, spin, both games, game over, the board — as PPM, for reviewing
-a rendering change without a terminal in the way.
+`DESIGN.md` is the long version: why the screen is shaped this way, what a
+frame costs and where it goes, what was tried and thrown away, and what it
+would take to add a third game.

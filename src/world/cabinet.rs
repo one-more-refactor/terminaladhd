@@ -120,30 +120,40 @@ pub fn strip(
     let y = l.strip_sub as i32;
     let left = format!("1UP {score:06}");
     let right = format!("HI {best:06}");
+    // On a frame too narrow for the markers the numbers keep their colours and
+    // lose their labels. White on the left is the live score and yellow on the
+    // right is the record on every machine ever built; the words were only ever
+    // confirming it.
+    let labelled = text_w(&left, 1) + text_w(&right, 1) + 8 <= l.w as i32;
 
-    if blink {
-        text(b, "1UP", 2, y, 1, c(RED), 0.6);
-    }
-    text(b, &left[3..], 2 + text_w("1UP", 1), y, 1, c(WHITE), 0.35);
-
-    let rx = l.w as i32 - text_w(&right, 1) - 2;
-    text(b, "HI", rx, y, 1, c(CYAN), 0.5);
-    text(
-        b,
-        &right[2..],
-        rx + text_w("HI", 1),
-        y,
-        1,
-        c(YELLOW),
-        0.35,
-    );
+    let rx = if labelled {
+        if blink {
+            text(b, "1UP", 2, y, 1, c(RED), 0.6);
+        }
+        text(b, &left[3..], 2 + text_w("1UP", 1), y, 1, c(WHITE), 0.35);
+        let rx = l.w as i32 - text_w(&right, 1) - 2;
+        text(b, "HI", rx, y, 1, c(CYAN), 0.5);
+        text(b, &right[2..], rx + text_w("HI", 1), y, 1, c(YELLOW), 0.35);
+        rx
+    } else {
+        let (l6, r6) = (format!("{score:06}"), format!("{best:06}"));
+        text(b, &l6, 2, y, 1, c(WHITE), 0.35);
+        let rx = l.w as i32 - text_w(&r6, 1) - 2;
+        text(b, &r6, rx, y, 1, c(YELLOW), 0.35);
+        rx
+    };
 
     // The middle slot carries the game's name, and gives it up whenever the
     // game has something to shout. A machine talks to you from its status
     // strip; a banner floating over the playfield is a modern habit, and at
     // most sizes there is nowhere to put one that does not collide.
     let mid = l.w as i32 / 2;
-    let free = rx - (2 + text_w(&left, 1)) - 6;
+    let lw = if labelled {
+        text_w(&left, 1)
+    } else {
+        text_w("000000", 1)
+    };
+    let free = rx - (2 + lw) - 6;
     match shout {
         Some((word, life)) if text_w(word, 1) <= free => {
             let fade = (life * 1.8).min(1.0);
@@ -185,7 +195,8 @@ pub fn rule(b: &mut Buf, l: &Layout, progress: Option<f32>) {
 /// right. Dim, never bloomed — it is the one thing on screen that is not
 /// asking to be looked at.
 pub fn ticker(b: &mut Buf, l: &Layout, left: &str, right: &str) {
-    let y = l.ticker_sub as i32;
+    let Some(y) = l.ticker_sub else { return };
+    let y = y as i32;
     let dim = c(STEEL).mul(0.75);
     let budget = (((l.w as i32 - text_w(right, 1) - 8) / 4).max(0)) as usize;
     let s: String = left.chars().take(budget).collect();
@@ -242,6 +253,11 @@ pub struct Stat {
 /// A game's readings, stacked down the right column under whatever the game
 /// hung there first. Returns the sub-row after the last one.
 pub fn readouts(b: &mut Buf, l: &Layout, x: i32, y: i32, stats: &[Stat]) -> i32 {
+    // One form for the whole stack. Shortening only the labels that do not fit
+    // leaves APPLES abbreviated next to MULT written out, which reads as a
+    // mistake rather than as a decision.
+    let room = col_w(l);
+    let long = stats.iter().all(|s| text_w(s.label, 1) <= room);
     let mut y = y;
     for s in stats {
         if l.compact_readouts {
@@ -251,7 +267,8 @@ pub fn readouts(b: &mut Buf, l: &Layout, x: i32, y: i32, stats: &[Stat]) -> i32 
             y += FOLDED_SUB as i32;
             continue;
         }
-        let inner = heading(b, l, x, y, s.label, s.short);
+        let label = if long { s.label } else { s.short };
+        let inner = heading(b, l, x, y, label, s.short);
         text(b, &s.value.to_string(), x, inner, 1, s.hue, 0.45);
         y = inner + (READOUT_SUB - HEAD_SUB) as i32;
     }

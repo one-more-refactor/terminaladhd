@@ -21,12 +21,23 @@ use crate::world::{enc_diff, Cell};
 /// Used when the terminal will not say how big it is (a pipe, a CI log).
 pub const FALLBACK_SIZE: (usize, usize) = (120, 34);
 
-/// Below this the arena does not fit between the status strip and the ticker.
-/// A twenty-row playfield at the smallest legible block is twenty rows; the
-/// strip and the ticker are three each, because the face is five sub-rows and a
-/// cell is two. That is twenty-six, and no arrangement of the chrome gets it
-/// lower without a second font.
-pub const MIN_SIZE: (usize, usize) = (80, 26);
+/// Below this the arena does not fit under the status strip. A twenty-row
+/// playfield at the smallest legible block is twenty rows and the strip is
+/// three, because the face is five sub-rows and a cell is two. That is
+/// twenty-three, plus one for the sub-pixel the arena's frame is drawn on. The
+/// only way lower is a second, shorter font.
+///
+/// Between twenty-three and twenty-six there is no room for the ticker, so the
+/// command's output gives way rather than the game — which is the trade a phone
+/// held in portrait wants.
+pub const MIN_SIZE: (usize, usize) = (60, 24);
+
+/// Whether this session came in over the network. A local terminal is a memcpy
+/// away from the screen; an SSH session is paying for every byte, and on a
+/// phone it may be paying in cellular data.
+pub fn remote() -> bool {
+    std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some()
+}
 
 /// Whether there is a terminal to draw on at all. stderr, because that is
 /// where the picture goes — stdout may well be a pipe by design.
@@ -88,22 +99,27 @@ fn restore() {
 pub struct Presenter {
     body: Vec<u8>,
     out: Vec<u8>,
+    /// Matched to the stage's own resolve tolerance, or the diff will re-send
+    /// cells the resolver already decided were the same.
+    pub tol: i32,
 }
 
-/// Colour-match tolerance and the run-joining gap, matched to the stage's own
-/// resolve tolerance.
-const TOL: i32 = 2;
+/// The run-joining gap: cells this far apart are worth re-addressing rather
+/// than repainting through.
 const GAP: usize = 6;
 
 impl Presenter {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(tol: i32) -> Self {
+        Presenter {
+            tol,
+            ..Default::default()
+        }
     }
 
     /// One atomic present: DEC 2026 brackets the whole diff so a burst lands as
     /// a single update instead of tearing across the scanout.
     pub fn frame(&mut self, cells: &[Cell], prev: &[Cell], w: usize, h: usize) -> Result<()> {
-        enc_diff(cells, prev, w, h, TOL, GAP, &mut self.body);
+        enc_diff(cells, prev, w, h, self.tol, GAP, &mut self.body);
         self.out.clear();
         self.out.extend_from_slice(b"\x1b[?2026h");
         self.out.extend_from_slice(&self.body);

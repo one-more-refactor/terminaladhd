@@ -144,6 +144,39 @@ glass, so it is first. The guns are behind the glass, so the fringe is next. Hum
 and vignette are properties of the tube. The shake moves the whole chassis. The
 collapse is the power going, and it happens to whatever the screen was showing.
 
+## What a frame costs
+
+Every pass in the chain costs bytes on a wire, not just cycles, and on a phone
+over cellular that is the whole bill. `adhd --bench` encodes three hundred
+frames of real play and counts the diff. On a 120×34 frame:
+
+| | bytes/frame | KB/s at 60 |
+|---|---:|---:|
+| full | 8503 | 498 |
+| full, no warp field | 595 | 35 |
+| full, no hum | 8299 | 486 |
+| full, no fringe | 8503 | 498 |
+| full, tolerance 14 | 1821 | 107 |
+| lean | 1792 | 105 |
+
+The result is not what it looks like from the code. The CRT passes are nearly
+free — the hum costs two hundred bytes a frame and the fringe measures as zero,
+because it only rewrites cells that were already being re-sent. **The warp field
+is ninety-three per cent of the traffic**, and not because it is large: it is
+faint, and bloom spreads that faintness across almost every cell, and a
+two-level colour-match tolerance calls almost every one of those a change.
+
+So the fix is not to delete the field. It is to stop re-sending changes nobody
+can see: at tolerance 14 the same picture costs a fifth. That, half the frame
+rate, and dropping the two passes that dirty cells nothing asked to change is
+what `--lean` is, and it is the default whenever `SSH_CONNECTION` is set.
+
+Measured end to end through a pty: 601 KB/s local, 90 KB/s over SSH.
+
+A cell costs up to forty bytes — two truecolor SGRs and a three-byte glyph — so
+a full repaint of that frame is 159 KB. Everything above is the diff doing its
+job; the question was only ever how much of the frame it decides has changed.
+
 ## Things that were deliberately not done
 
 - **A third game.** Two games done properly beat three done adequately, and the
@@ -154,6 +187,12 @@ collapse is the power going, and it happens to whatever the screen was showing.
   text, and text that wobbles is not authenticity, it is a bug.
 - **Letting the player replay the same game.** Tempting, and rejected: the
   moment you can choose, the machine is a menu with extra steps.
+- **An adaptive snake arena.** It should have one — snake does not care whether
+  it is 20×20 or 12×12, and on a 60-column phone the fixed size eats the flank
+  its readings need. What stopped it is that a resize would then change the
+  arena under a running snake whose body is already outside the new one. It
+  wants the layout to follow the game's field rather than the game's kind, and
+  that is a change worth making carefully rather than at the end of a session.
 
 ## Adding a game
 
