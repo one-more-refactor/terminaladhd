@@ -42,19 +42,24 @@ const TIER_SIZE: u32 = 3;
 /// the whole arena open.
 const START_LEN: usize = 5;
 
-/// What a golden apple multiplies its tier's payout by, and the length it is
-/// worth. A plain apple pays its tier flat.
+/// What a golden apple multiplies its tier's payout by. It grows the snake by
+/// the same single cell an ordinary apple does: the bonus is already the risk
+/// of crossing the field for it under a clock, and charging extra length on top
+/// makes taking it a punishment for succeeding.
 const GOLD_PAYOUT: u32 = 5;
-const GOLD_GROWTH: usize = 3;
+const GOLD_GROWTH: usize = 1;
 /// Every Nth apple is golden, and it does not wait around.
 const GOLD_EVERY: u32 = 5;
-const GOLD_LIFE: f32 = 6.0;
+/// Short enough that seeing one means dropping the line you were on and going
+/// for it. At the widest crossing of the field it is not always reachable, and
+/// that is the point — it has to be a decision rather than a collection.
+const GOLD_LIFE: f32 = 3.5;
 
 /// Eat again inside this window and the multiplier climbs; miss it and the run
-/// starts over at one. Chosen so crossing the arena for the next apple is
-/// possible but never comfortable.
-const STREAK_WINDOW: f32 = 3.2;
-const MAX_MULT: u32 = 9;
+/// starts over at one. It does not shrink with the tier: the faster the snake,
+/// the easier chaining gets, which is the reward for surviving the climb.
+const STREAK_WINDOW: f32 = 2.5;
+const MAX_MULT: u32 = 8;
 
 const HEAT_DECAY_SECS: f32 = 2.5;
 const SHAKE_DECAY_SECS: f32 = 0.30;
@@ -152,10 +157,10 @@ impl Snake {
     }
 
     pub fn with_rng(mut rng: Rng) -> Self {
-        // Facing right from just left of centre, so there is a full arena of
-        // runway ahead and no wall to meet before the player has taken hold.
+        // Facing right out of the middle: the same runway either side, and no
+        // wall to meet before the player has taken hold.
         let cy = ROWS / 2;
-        let x0 = COLS / 3;
+        let x0 = COLS / 2;
         let body: VecDeque<(i32, i32)> = (0..START_LEN as i32).map(|i| (x0 - i, cy)).collect();
         let apple = place(&mut rng, &body, false);
         Snake {
@@ -804,4 +809,69 @@ mod tests {
             assert!(!g.body.contains(&a.at));
         }
     }
+}
+
+#[cfg(test)]
+mod balance {
+    use super::*;
+
+    /// Seconds to cross the field corner to corner at a given tier — the worst
+    /// an apple can be placed.
+    fn worst(eaten: u32) -> f32 {
+        let mut g = Snake::with_rng(Rng::from_seed(1));
+        g.eaten = eaten;
+        (COLS + ROWS - 2) as f32 * g.interval()
+    }
+
+    /// Seconds to the average apple: the mean Manhattan distance between two
+    /// uniform points on the grid is a third of each side.
+    fn typical(eaten: u32) -> f32 {
+        let mut g = Snake::with_rng(Rng::from_seed(1));
+        g.eaten = eaten;
+        (COLS + ROWS) as f32 / 3.0 * g.interval()
+    }
+
+    #[test]
+    fn the_ordinary_apple_is_chainable_and_the_far_one_is_not() {
+        // This is the whole tension of the game. If every apple were inside the
+        // window the multiplier would be free; if none were it would be
+        // decoration. The average has to be in and the corner has to be out.
+        for eaten in [0, 3, 6, 9, 12, 15, 40] {
+            assert!(
+                typical(eaten) < STREAK_WINDOW,
+                "the average apple is out of reach at {eaten} eaten"
+            );
+            assert!(
+                worst(eaten) > STREAK_WINDOW,
+                "even the far corner keeps the chain at {eaten} eaten"
+            );
+        }
+    }
+
+    #[test]
+    fn chaining_gets_easier_as_the_snake_gets_faster() {
+        // The reward for surviving the climb: the window does not shrink with
+        // the tier, so the same field takes less time to cross.
+        assert!(typical(40) < typical(0));
+        assert!(worst(40) < worst(0));
+    }
+
+    #[test]
+    fn a_golden_apple_is_a_decision_rather_than_a_collection() {
+        // Reachable on average from the moment it appears, and not reachable
+        // from the far corner until the snake has earned some speed.
+        assert!(typical(0) < GOLD_LIFE, "never worth going for");
+        assert!(worst(0) > GOLD_LIFE, "always worth going for");
+    }
+
+    /// A square arena leaves the player equidistant from everything and the
+    /// game loses its rhythm of long runs into tight corners; three times as
+    /// wide as it is tall is a corridor. Checked at compile time, since both
+    /// sides are constants.
+    const _: () = {
+        assert!(COLS > ROWS);
+        assert!(COLS < 3 * ROWS);
+        // Charging length for the bonus punishes taking it.
+        assert!(GOLD_GROWTH == 1);
+    };
 }

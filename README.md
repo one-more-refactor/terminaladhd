@@ -26,8 +26,8 @@ and the fastest way to stop deciding is to have the machine decide.
 
 | | |
 |---|---|
-| **BLOCKS** | Guideline tetris — SRS kicks, hold, ghost, T-spins, all-spins, perfect clears, back-to-back and combo. Gravity opens at level 5 and climbs on lines *and* on the clock, so a tidy board is not a way to stay slow. |
-| **SNAKE** | The body glides between cells rather than jumping them, which is the whole difference between a snake and a cursor. Walls kill, and the one you are running at lights up before you reach it. Six speed tiers, three apples apart. Apples eaten back to back build a multiplier up to 9× that one hesitation drops to 1, and every fifth apple is golden, worth five times its tier and gone in six seconds. |
+| **BLOCKS** | Guideline tetris — SRS kicks, hold, ghost, T-spins, all-spins, perfect clears, back-to-back and combo. Gravity opens at 355 ms a row and climbs on lines *and* on the clock, so a tidy board is not a way to stay slow — but it floors at 60 ms, because the Guideline curve carried past three minutes is not a game any more. |
+| **SNAKE** | The body glides between cells rather than jumping them, which is the whole difference between a snake and a cursor. A 26×14 field — wide, because long runs into tight corners is what snake is. Walls kill, and the one you are running at lights up before you reach it. Six speed tiers, three apples apart, 150 ms a cell down to 75. Apples eaten back to back build a multiplier to 8×, and the numbers are set so the average apple chains and the far corner does not. Every fifth is golden, worth five times its tier and gone in three and a half seconds. |
 
 High scores are kept per game, top ten, in
 `$XDG_DATA_HOME/terminaladhd/scores` — or wherever `ADHD_SCORES` points.

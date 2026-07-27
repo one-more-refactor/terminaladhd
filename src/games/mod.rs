@@ -129,11 +129,12 @@ impl Kind {
     pub const fn field(self) -> (usize, usize) {
         match self {
             Kind::Tetris => (10, 20),
-            // Square in minos lands as a square arena on screen, because a mino
-            // is square in sub-pixels. A portrait field would make snake a
-            // corridor. Twenty is also the most rows that still fit an 80x24
-            // terminal, which is the floor the world supports at all.
-            Kind::Snake => (20, 20),
+            // Wide, not square. A mino is square in sub-pixels, so 26x14 lands
+            // as a field about twice as wide as it is tall — which is the shape
+            // snake has always been played on, and the shape a terminal is.
+            // A square arena leaves the player equidistant from everything and
+            // the game loses its rhythm of long runs into tight corners.
+            Kind::Snake => (26, 14),
         }
     }
 

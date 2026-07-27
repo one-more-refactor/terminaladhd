@@ -116,6 +116,52 @@ screen.
 A snake that jumps a cell at a time reads as a cursor. The same snake sliding
 the same distance reads as an animal, and it is the same game underneath.
 
+## Balance
+
+Both games are tuned against `blipscreen`'s, which is the version that felt
+right, and the numbers were diffed rather than guessed. Where they differ now it
+is deliberate.
+
+**Snake.** The speed curve is the reference's exactly: six tiers three apples
+apart, 150 ms a cell down to 75 ms, reached around the fifteenth apple. What had
+drifted was everything around it.
+
+The field was 20×20. A square arena leaves the player equidistant from
+everything and the game loses its rhythm — long runs into tight corners is what
+snake *is*. It is 26×14 now, about twice as wide as it is tall, which is both
+the shape the game has always been played on and the shape of a terminal.
+
+The bonus apple used to grow the snake by three cells. The bonus is already the
+risk of crossing the field for it under a clock; charging extra length on top
+makes taking it a punishment for succeeding. It grows by one, like any apple.
+
+Its clock was six seconds and the streak window was 3.2, both of which made the
+game slack. They are 3.5 and 2.5, which puts them either side of a line worth
+being precise about:
+
+| | tier 0 | tier 5 |
+|---|---:|---:|
+| average apple | 2.0 s | 1.0 s |
+| far corner | 5.7 s | 2.9 s |
+| streak window | 2.5 s | 2.5 s |
+
+The average apple is inside the window and the far corner is outside it, at
+every tier. That is the whole tension: if every apple chained the multiplier
+would be free, and if none did it would be decoration. And because the window
+does not shrink as the snake speeds up, chaining gets *easier* the further you
+get — which is the reward for surviving the climb. Tests assert both halves.
+
+**Tetris** had a real bug rather than a drift. The Guideline gravity curve is
+exponential and has no floor, and this machine hands out a level on the clock
+whether or not anyone is clearing lines. Carried three minutes it passed twenty
+rows a frame, so a long build ended in a board nobody could have played.
+
+There is a floor now, at 60 ms a row, reached at about two and a half minutes.
+It is brutal and still human, because a grounded piece keeps its full
+500 ms lock window whatever gravity is doing — the floor governs how long you
+have to think, not how long you have to place. The curve runs 355 ms at the
+start, 190 at a minute, 135 at ninety seconds, and settles.
+
 ## The monitor
 
 `world::crt` is the last pass, and everything in it is an artefact of a real

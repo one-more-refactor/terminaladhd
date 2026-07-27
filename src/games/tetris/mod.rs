@@ -33,8 +33,22 @@ const NEXT_SHOWN: usize = 5;
 
 /// Lines cleared per level, and the wall-clock alternative — sitting on a tidy
 /// board must not be a way to stay slow.
-const LINES_PER_LEVEL: u32 = 4;
-const LEVEL_TIME_SECS: u64 = 15;
+const LINES_PER_LEVEL: u32 = 5;
+const LEVEL_TIME_SECS: u64 = 25;
+
+/// The fastest a piece is ever allowed to fall, in seconds per row.
+///
+/// The Guideline curve is exponential and has no floor: carried far enough it
+/// passes twenty rows a frame and the game stops being playable at all. That
+/// matters here more than it does in a marathon, because the clock hands out
+/// levels whether or not anyone is clearing lines, and a build that runs three
+/// minutes would otherwise end in a board nobody could have played. Fifty
+/// milliseconds a row is brutal and still human, because a grounded piece gets
+/// a five-hundred-millisecond lock window whatever gravity is doing — the floor
+/// governs how long you have to think, not how long you have to place.
+///
+/// Reached at about two and a half minutes, which is a long build.
+const FALL_FLOOR: f32 = 0.06;
 
 /// The gravity curve is offset so play opens at Guideline level 5 (≈0.35 s/row)
 /// rather than the one-row-a-second of level 1. A cabinet did not open slow, and
@@ -228,7 +242,7 @@ impl Tetris {
     pub fn fall_seconds(&self) -> f32 {
         let l = (self.level() + GRAVITY_LEVEL_OFFSET) as f32;
         let base = (0.8 - (l - 1.0) * 0.007).max(0.001);
-        base.powf(l - 1.0).max(0.0001)
+        base.powf(l - 1.0).max(FALL_FLOOR)
     }
 
     // ------------------------------------------------------------ the clock
@@ -976,5 +990,57 @@ mod tests {
         let active_bottom = cells.iter().map(|&(_, r)| r).max().unwrap();
         let ghost_bottom = ghost.iter().map(|&(_, r)| r).max().unwrap();
         assert!(ghost_bottom >= active_bottom);
+    }
+}
+
+#[cfg(test)]
+mod balance {
+    use super::*;
+
+    /// The level at `secs` of play with nothing cleared — the clock alone.
+    fn at(secs: u64) -> Tetris {
+        let mut g = Tetris::with_rng(Rng::from_seed(1));
+        g.elapsed = Duration::from_secs(secs);
+        g
+    }
+
+    #[test]
+    fn the_curve_opens_playable_and_never_runs_away() {
+        // The opening has to be brisk without being a test of reflexes, and the
+        // end has to still be a game. Between those two the shape is the
+        // Guideline curve's business, not ours.
+        let open = at(0).fall_seconds();
+        assert!(
+            (0.25..=0.45).contains(&open),
+            "opening gravity {open} is outside the playable band"
+        );
+        for secs in [0, 30, 60, 120, 300, 900] {
+            let fall = at(secs).fall_seconds();
+            assert!(
+                fall >= FALL_FLOOR,
+                "gravity ran away to {fall} at {secs}s — past the floor there is
+                 no game left to play"
+            );
+        }
+    }
+
+    #[test]
+    fn the_curve_only_ever_tightens() {
+        let mut last = f32::MAX;
+        for secs in (0..600).step_by(10) {
+            let fall = at(secs).fall_seconds();
+            assert!(fall <= last, "gravity loosened at {secs}s");
+            last = fall;
+        }
+    }
+
+    #[test]
+    fn a_long_build_still_leaves_a_game() {
+        // Three minutes is a long build. At the floor a piece still takes over
+        // a second to fall the well, and a grounded one keeps its full lock
+        // window whatever gravity is doing.
+        let fall = at(180).fall_seconds();
+        assert!(fall * VISIBLE as f32 > 1.0, "a piece crosses the well too fast");
+        assert!(handling::LOCK_DELAY >= Duration::from_millis(400));
     }
 }
