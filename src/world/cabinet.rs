@@ -151,6 +151,28 @@ pub fn floor(b: &mut Buf, l: &Layout, shake: i32, rule: Rule, filled: &dyn Fn(i3
     }
 }
 
+/// Flip the inside of the arena to its negative for a frame or two. The border
+/// and the strip hold still, which is what makes the field itself look like it
+/// fired rather than the monitor glitching.
+pub fn flash_arena(b: &mut Buf, l: &Layout, shake: i32) {
+    let (x0, y0, x1, y1) = l.arena_sub(shake);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            if x < 0 || y < 0 || x as usize >= b.w || y as usize >= b.sh {
+                continue;
+            }
+            let i = y as usize * b.w + x as usize;
+            let p = b.base[i];
+            b.base[i] = Rgb::new(
+                (1.0 - p.r).max(0.0),
+                (1.0 - p.g).max(0.0),
+                (1.0 - p.b).max(0.0),
+            );
+            b.emis[i] = Rgb::ZERO;
+        }
+    }
+}
+
 // ------------------------------------------------------------------- strip
 
 /// The status strip: `1UP` and the live score at the left, the game's name in

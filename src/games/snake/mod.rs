@@ -78,6 +78,10 @@ const HITSTOP_DEATH: u32 = 10;
 /// How long a `+N` marker stays in the air.
 const POP_SECS: f32 = 0.8;
 
+/// Render frames the arena stays inverted after an apple. Short and local: the
+/// field fires, the rest of the machine does not move.
+const EAT_FLASH: u32 = 3;
+
 /// Turns banked beyond this are dropped. Three is enough to bank a double
 /// corner between moves without the snake driving itself.
 const QUEUE_CAP: usize = 3;
@@ -150,6 +154,8 @@ pub struct Snake {
     /// Debris. An apple bursts when it is taken and the body comes apart when
     /// the run ends.
     pub(crate) sparks: Sparks,
+    /// Frames of inverted playfield left from the last apple.
+    flash: u32,
     over: bool,
     /// `0.0..=1.0` once dead — how far the body has burned away.
     death: f32,
@@ -191,6 +197,7 @@ impl Snake {
             hitstop: 0,
             kick: None,
             sparks: Sparks::new(),
+            flash: 0,
             over: false,
             death: 0.0,
         }
@@ -283,6 +290,11 @@ impl Snake {
     /// `0.0..=1.0` once dead, still 0 while alive.
     pub fn death(&self) -> f32 {
         self.death
+    }
+
+    /// Whether the field is still lit from the last apple.
+    pub fn flashing(&self) -> bool {
+        self.flash > 0
     }
 
     /// Seconds since the last apple. The frame flare reads it, and so does the
@@ -403,6 +415,7 @@ impl Snake {
             self.sparks
                 .burst(&mut self.rng, at, 10, 11.0, crate::world::hex(0x00FF87));
         }
+        self.flash = EAT_FLASH;
         self.punch = self.punch.max(if gold { 0.9 } else { 0.45 });
         if gold {
             self.shout = Some(("GOLDEN".into(), 1.0));
@@ -487,6 +500,7 @@ impl Game for Snake {
         }
         self.pops.retain(|p| p.life > 0.0);
         self.sparks.step(dts);
+        self.flash = self.flash.saturating_sub(1);
 
         // Dead snakes still burn: the shell keeps stepping so the dissolve runs
         // on the same clock as everything else.

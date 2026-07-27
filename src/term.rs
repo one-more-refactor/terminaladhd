@@ -6,12 +6,15 @@
 //! command's bytes and nothing of ours.
 
 use std::io::{self, IsTerminal, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{
+        self, Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -75,6 +78,35 @@ impl Guard {
     }
 }
 
+/// Ask the terminal to report key releases, and say whether it agreed.
+///
+/// This is the single largest thing standing between this and a game that feels
+/// like one. A terminal does not normally send a key-up: a held key arrives as
+/// the operating system's own auto-repeat, which waits about half a second
+/// before it starts. No amount of tuning inside the game can fix that, because
+/// during those five hundred milliseconds nothing arrives at all — the piece
+/// moves once and then sits there.
+///
+/// The kitty keyboard protocol reports press and release separately, which is
+/// what the handling code has always assumed it had.
+pub fn enable_key_release() -> bool {
+    if !matches!(terminal::supports_keyboard_enhancement(), Ok(true)) {
+        return false;
+    }
+    io::stderr()
+        .execute(PushKeyboardEnhancementFlags(
+            // Releases for the arrows, and all keys as escape codes so plain
+            // letters — wasd, hjkl — get them too.
+            KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES,
+        ))
+        .is_ok()
+}
+
+fn disable_key_release() {
+    let _ = io::stderr().execute(PopKeyboardEnhancementFlags);
+}
+
 impl Drop for Guard {
     fn drop(&mut self) {
         restore();
@@ -82,6 +114,7 @@ impl Drop for Guard {
 }
 
 fn restore() {
+    disable_key_release();
     let mut err = io::stderr();
     let _ = err.execute(cursor::Show);
     let _ = err.execute(LeaveAlternateScreen);
@@ -253,15 +286,124 @@ pub struct Poll {
     pub resize: Option<(usize, usize)>,
 }
 
-/// Non-blocking: fold every pending event into one [`Poll`].
-pub fn poll() -> Result<Poll> {
-    let mut p = Poll::default();
-    while event::poll(Duration::ZERO)? {
-        match event::read()? {
-            Event::Key(k) => p.keys.press(k.code, k.modifiers),
-            Event::Resize(c, r) => p.resize = Some((c as usize, r as usize)),
-            _ => {}
+/// How long a direction stays held after its last event when the terminal will
+/// not report releases. Deliberately shorter than DAS, so a tap can never start
+/// an auto-shift — on such a terminal the only honest reading of a key event is
+/// "this happened once".
+const ASSUMED_HOLD: Duration = Duration::from_millis(60);
+
+/// The four directions, in the order [`Pad`] tracks them.
+const DIRS: usize = 4;
+const LEFT: usize = 0;
+const RIGHT: usize = 1;
+const UP: usize = 2;
+const DOWN: usize = 3;
+
+/// The keyboard, across frames.
+///
+/// Held state cannot live in [`Keys`], which is one frame's worth: whether a
+/// direction is still down is a fact about the world, not about this frame. On
+/// a terminal that reports releases this is exact, and everything the handling
+/// code does with DAS and auto-repeat finally means what it says.
+pub struct Pad {
+    releases: bool,
+    held: [bool; DIRS],
+    seen: [Option<Instant>; DIRS],
+}
+
+impl Pad {
+    /// Turn on key-release reporting if the terminal has it, and say so.
+    pub fn open() -> Pad {
+        Pad {
+            releases: enable_key_release(),
+            held: [false; DIRS],
+            seen: [None; DIRS],
         }
     }
-    Ok(p)
+
+    /// Whether this terminal can tell us a key went up. Worth surfacing: on one
+    /// that cannot, movement is at the mercy of the operating system's repeat
+    /// delay and there is nothing the game can do about it.
+    pub fn precise(&self) -> bool {
+        self.releases
+    }
+
+    /// Non-blocking: fold every pending event into one [`Poll`], and carry the
+    /// held directions across from the last frame.
+    pub fn poll(&mut self) -> Result<Poll> {
+        let mut p = Poll::default();
+        let now = Instant::now();
+        while event::poll(Duration::ZERO)? {
+            match event::read()? {
+                Event::Key(k) => {
+                    // Releases only ever clear a direction. Everything else —
+                    // rotate, drop, hold — is an edge, and a release of it is
+                    // not a second press.
+                    if k.kind == KeyEventKind::Release {
+                        for (i, d) in direction(k.code).into_iter().enumerate().filter(|(_, d)| *d)
+                        {
+                            let _ = d;
+                            self.held[i] = false;
+                            self.seen[i] = None;
+                        }
+                        continue;
+                    }
+                    p.keys.press(k.code, k.modifiers);
+                    for (i, d) in direction(k.code).into_iter().enumerate() {
+                        if d {
+                            self.held[i] = true;
+                            self.seen[i] = Some(now);
+                        }
+                    }
+                }
+                Event::Resize(c, r) => p.resize = Some((c as usize, r as usize)),
+                _ => {}
+            }
+        }
+
+        if !self.releases {
+            // Nothing said the key went up, so assume it did unless something
+            // said otherwise recently.
+            for i in 0..DIRS {
+                if self.seen[i].is_some_and(|t| now.duration_since(t) > ASSUMED_HOLD) {
+                    self.held[i] = false;
+                    self.seen[i] = None;
+                }
+            }
+        }
+
+        p.keys.left |= self.held[LEFT];
+        p.keys.right |= self.held[RIGHT];
+        p.keys.up |= self.held[UP];
+        p.keys.down |= self.held[DOWN];
+        Ok(p)
+    }
+
+    /// Forget everything held. Used when the machine changes screens, so a
+    /// direction still down when a run ends does not steer the next one.
+    pub fn release_all(&mut self) {
+        self.held = [false; DIRS];
+        self.seen = [None; DIRS];
+    }
+}
+
+/// Which of the four directions a key means, if any. Arrows, vim and the
+/// left-hand grip all land here.
+fn direction(code: KeyCode) -> [bool; DIRS] {
+    let mut d = [false; DIRS];
+    match code {
+        KeyCode::Left => d[LEFT] = true,
+        KeyCode::Right => d[RIGHT] = true,
+        KeyCode::Up => d[UP] = true,
+        KeyCode::Down => d[DOWN] = true,
+        KeyCode::Char(c) => match c.to_ascii_lowercase() {
+            'h' | 'a' => d[LEFT] = true,
+            'l' | 'd' => d[RIGHT] = true,
+            'k' | 'w' => d[UP] = true,
+            'j' | 's' => d[DOWN] = true,
+            _ => {}
+        },
+        _ => {}
+    }
+    d
 }

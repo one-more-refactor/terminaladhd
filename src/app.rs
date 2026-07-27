@@ -202,6 +202,7 @@ enum Mode {
 
 pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Result<Exit> {
     let _guard = term::Guard::enter()?;
+    let mut pad = term::Pad::open();
 
     let mut rng = Rng::new();
     let mut scores = Table::load();
@@ -238,7 +239,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
         let frame_start = Instant::now();
         frame_no = frame_no.wrapping_add(1);
 
-        let poll = term::poll()?;
+        let poll = pad.poll()?;
         if let Some((cw, ch)) = poll.resize {
             term_size = (cw, ch);
             if cw >= term::MIN_SIZE.0 && ch >= term::MIN_SIZE.1 && (cw != stage.w || ch != stage.h)
@@ -289,6 +290,11 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             }
         }
 
+        // A key still down when the screen changes must not steer whatever
+        // comes next.
+        if machine.pending.is_some() {
+            pad.release_all();
+        }
         let closing = machine.cut(STEP.as_secs_f32());
         stage.curtain = machine.curtain;
         // On the way back in the picture is still bending; on the way out it is

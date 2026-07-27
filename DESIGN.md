@@ -101,6 +101,31 @@ hairline fading out under it and returns where content starts. Both games stack
 everything through it, so the queue and the readings share a left edge and a
 rhythm.
 
+## The terminal will not tell you a key went up
+
+This was the single biggest thing standing between the machine and a game, and
+no amount of tuning inside the games could have found it, because the problem
+was never inside them.
+
+A terminal does not send a key-up. A held direction arrives as the operating
+system's own auto-repeat, which waits about half a second before it starts — so
+a piece moves once and then sits there, and then moves fast. All the DAS and
+auto-repeat handling in `tetris::handling` was written as though it had held-key
+state and it never had any: `keys.left` was only true on the frames a repeat
+event happened to land on.
+
+The kitty keyboard protocol reports press and release separately. `term::Pad`
+asks for it, and keeps the four directions across frames — whether a key is
+still down is a fact about the world rather than about this frame. On a terminal
+that supports it (kitty, foot, ghostty, WezTerm, recent xterm) the handling code
+finally means what it says.
+
+On one that does not, a direction is assumed held for sixty milliseconds after
+its last event. That is deliberately shorter than DAS, so a tap can never start
+an auto-shift: on such a terminal the only honest reading of a key event is
+"this happened once", and pretending otherwise would make a single press slide
+a piece across the well.
+
 ## Everything glides
 
 The logic of both games moves in whole cells. Nothing on screen does.
@@ -126,6 +151,29 @@ the piece was longest ago.
 
 And the handling was slow. DAS was 133 ms, which is long enough to read as the
 game not listening; it is 100. The soft-drop floor was 25 ms a row and is 15.
+
+## Snake looks like a snake
+
+The body was a gradient from cyan to magenta with a bloom halo, a shimmer
+travelling down it and eyes on the head. It read as a smeary rainbow rope,
+because on a screen this size a gradient under bloom is a smear and none of the
+work was being done by the shape.
+
+It is one colour now, and the shape does everything: a chain of segments with
+their middles punched out, and one solid, near-white head. That is how every
+snake ever drawn on a small screen has been drawn, and it survived because a
+chain of parts reads as a body while a filled line reads as a smear.
+
+The morsel is a diamond rather than a block, because it has to read as
+*not-snake* at a glance and a square cannot. The bonus blinks between a solid
+block and that diamond, at double rate over the last quarter of its clock — so
+it never disappears outright, and the urgency is carried by the rate rather than
+by dimming, since it must not be hard to see in the moment it is worth the most.
+
+And an apple inverts the *inside of the arena* for three frames. The border and
+the strip holding still is what makes it read as the field firing rather than
+the monitor glitching — which is also why the ordinary apple does not get one of
+the full-screen reactions.
 
 ## Snake glides
 

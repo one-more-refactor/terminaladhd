@@ -263,6 +263,12 @@ fn play(kind: terminaladhd::games::Kind, steps: u32) -> Box<dyn terminaladhd::ga
         // the air: a still of a board at rest says nothing about how the game
         // pays out.
         if i > steps / 2 && !game.pops().is_empty() {
+            // A few frames past the hit, so the still shows the game rather
+            // than the frame the game happened to be inverted on.
+            for _ in 0..5 {
+                let input = game.autopilot();
+                game.step(&input, Duration::from_millis(16));
+            }
             break;
         }
     }
