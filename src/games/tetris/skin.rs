@@ -1,12 +1,40 @@
 //! Tetris-specific piece identity: the seven-piece order the 7-bag and the
-//! SRS kick tables are indexed by, plus the small conversions between that
-//! index and the [`Mino`] enum the renderer already knows how to colour.
-//!
-//! The colour, bevel, settled and ghost derivations live on [`Mino`] itself
-//! (see `synth::diorama`), so nothing about how a block is painted is
-//! duplicated here — only what the rules need to talk about pieces.
+//! SRS kick tables are indexed by, the conversions between that index and the
+//! [`Mino`] enum, and the neon each piece is painted in.
 
-pub use crate::world::diorama::Mino;
+use crate::world::scene::palette::*;
+use crate::world::{hex, Rgb};
+
+/// The seven tetrominoes. Colour and its settled/ghost derivations live on the
+/// enum, so the rules layer and the painter agree on piece identity in one
+/// place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mino {
+    I,
+    O,
+    T,
+    S,
+    Z,
+    J,
+    L,
+}
+
+impl Mino {
+    /// The classic cabinet assignment, in the machine's own six hues plus the
+    /// two it keeps for pieces. Each is at full saturation: on a black ground
+    /// there is no such thing as a colour that is too hot.
+    pub fn color(self) -> Rgb {
+        hex(match self {
+            Mino::I => CYAN,
+            Mino::O => YELLOW,
+            Mino::T => VIOLET,
+            Mino::S => GREEN,
+            Mino::Z => RED,
+            Mino::J => BLUE,
+            Mino::L => ORANGE,
+        })
+    }
+}
 
 /// The seven tetrominoes in canonical order. This is the order the 7-bag
 /// shuffles and the order every kick/shape table below is indexed by, so I

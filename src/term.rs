@@ -21,8 +21,12 @@ use crate::world::{enc_diff, Cell};
 /// Used when the terminal will not say how big it is (a pipe, a CI log).
 pub const FALLBACK_SIZE: (usize, usize) = (120, 34);
 
-/// Below this the world has nowhere to put a well, so there is nothing to play.
-pub const MIN_SIZE: (usize, usize) = (40, 14);
+/// Below this the arena does not fit between the status strip and the ticker.
+/// A twenty-row playfield at the smallest legible block is twenty rows; the
+/// strip and the ticker are three each, because the face is five sub-rows and a
+/// cell is two. That is twenty-six, and no arrangement of the chrome gets it
+/// lower without a second font.
+pub const MIN_SIZE: (usize, usize) = (80, 26);
 
 /// Ask the terminal for its size, falling back to something playable.
 pub fn size() -> (usize, usize) {

@@ -1,13 +1,13 @@
-//! The reflow solver — the ONLY source of a scene coordinate.
+//! The reflow solver — the ONLY source of a screen coordinate.
 //!
-//! SPEC section 2.1's lesson: a raw literal reaching a draw call must be a
-//! visible smell, not a silent bug. [`Layout::new`] takes the terminal size in
-//! cells and derives every rectangle the Diorama needs — the well, the horizon
-//! weld, the sun, the grid rungs, the selector word, the scenery signs, the
-//! ticker — so no draw call downstream computes geometry of its own.
+//! A raw literal reaching a draw call must be a visible smell, not a silent
+//! bug. [`Layout::for_field`] takes the terminal size in cells and derives every
+//! rectangle the cabinet needs — the status strip, the arena, the side columns,
+//! the ticker — so no draw call downstream computes geometry of its own.
 //!
-//! The reflow rule is SPEC section 2.2; the results match the authoritative rect
-//! table in section 2.6 at 80×24, 120×30 and 270×62 (asserted in the tests).
+//! The screen is a cabinet screen: a status strip on top, the ticker at the
+//! bottom, and the arena taking every row in between that it can. There is no
+//! scenery to leave room for.
 
 /// An inclusive cell rectangle, `[x0..=x1] × [y0..=y1]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,278 +27,231 @@ impl Rect {
     }
 }
 
-/// Every coordinate the scene draws from, derived once from `(w, h)`.
+/// Rows the chrome claims above and below the arena. The status face is five
+/// sub-rows and a cell is two, so the strip needs three rows to itself before
+/// the progress rule can have one — anything tighter and the rule is drawn
+/// through the score.
+const TOP_ROWS: usize = 3;
+const BOTTOM_ROWS: usize = 3;
+
+/// Columns a side column needs to carry a piece preview and two readings.
+const SIDE_MIN: usize = 10;
+
+/// Mino edges in sub-pixels, largest first. Ten is as big as a block reads
+/// before it is just a rectangle; two is as small as one reads at all.
+const MINO_SIZES: [usize; 7] = [10, 8, 6, 5, 4, 3, 2];
+const MINO_MIN: usize = 2;
+
+/// Every coordinate the cabinet draws from, derived once from `(w, h)`.
 #[derive(Clone, Debug)]
 pub struct Layout {
     pub w: usize,
     pub h: usize,
 
-    /// Sub-pixels per mino edge — only ever 2, 4 or 6 (the structural guarantee
-    /// against fractional scaling). A mino is `mino_px` cols × `mino_px` sub-rows.
+    /// Sub-pixels per mino edge — a whole number, which is the structural
+    /// guarantee against fractional scaling. A mino is `mino_px` cols ×
+    /// `mino_px` sub-rows, and a sub-pixel is square, so a mino is square.
     pub mino_px: usize,
 
-    /// The 10×20-mino playfield, cut into the sky above the weld.
-    pub well: Rect,
-    pub well_x0: usize,
-    pub well_w: usize,
-    pub well_h: usize,
+    /// The arena in minos. Tetris asks for 10×20; a game with a different shape
+    /// asks for its own, and every rectangle below reflows around it.
+    pub cols: usize,
+    pub rows: usize,
 
-    /// The cyan weld the tetris stack rests on (`top_air + well_h`).
-    pub horizon_row: usize,
-    /// The broad idle/selector floor the camera tilts to (`round(0.44·H)`).
-    pub horizon_idle: usize,
+    /// The playfield, centred in what the chrome leaves.
+    pub arena: Rect,
 
-    pub top_air: usize,
-    pub floor_rungs: usize,
-    /// Inclusive grid-rung rows, `horizon_row+1 ..= H-2`.
-    pub grid_rows: (usize, usize),
+    /// Sub-rows, not rows: both of these are anchored inside a cell rather than
+    /// on one, because a five-sub-row face does not fit a two-sub-row cell.
+    pub strip_sub: usize,
+    pub rule_sub: usize,
+    pub ticker_sub: usize,
 
-    pub scenery_each_side: usize,
-    pub lanes: usize,
-
-    /// Sun disc, at the tetris horizon (SPEC section 4.3). Sub-pixel centre and
-    /// radius are the values the renderer consumes; the cell-rounded pair is the
-    /// rect-table view.
-    pub sun_cx: f32,
-    pub sun_cy_sub: f32,
-    pub sun_r_sub: f32,
-    pub sun_center_row: usize,
-    pub sun_radius_rows: usize,
-
-    /// Selector word centred here on the weld, dot strip one rung below.
-    pub selector_center_col: usize,
-    pub dot_strip_row: usize,
-
-    /// Scenery sign anchors (top-left cell). HOLD is omitted on the narrowest
-    /// terminals, where the flanks cannot carry it (SPEC rect table, 80×24).
-    pub hold: Option<(usize, usize)>,
-    pub next: (usize, usize),
-    /// NEXT queue depth (SPEC rect table: 5 at 270, 3 at 120, 2 at 80).
+    /// Columns free either side of the arena. Below [`SIDE_MIN`] the side
+    /// columns do not exist and a game must do without them.
+    pub side: usize,
+    /// Top-left cell of each side column's content, when there is one.
+    pub left_col: Option<(usize, usize)>,
+    pub right_col: Option<(usize, usize)>,
+    /// Pieces of lookahead the right column has room to show.
     pub next_deep: usize,
-    pub score: (usize, usize),
-    pub lines: (usize, usize),
-    pub level: (usize, usize),
-    /// LINES/LVL share one small-text row instead of stacked 7-seg blocks when
-    /// the flank is too short to carry three signs above the ticker.
-    pub compact_stats: bool,
-
-    pub ticker_row: usize,
-}
-
-/// The sun geometry for a given weld, SPEC section 4.3. Returned as
-/// `(cx, cy_sub, r_sub)` in sub-pixels. Split out because the idle camera tilts
-/// the weld and the sun rises/sets with it.
-pub fn sun_at(w: usize, h: usize, horizon_row: usize) -> (f32, f32, f32) {
-    let sh = (h * 2) as f32;
-    let r = (0.26 * sh).min(0.16 * w as f32);
-    let y_h = 2.0 * horizon_row as f32;
-    let cx = w as f32 * 0.5;
-    let cy = y_h - 0.10 * r;
-    (cx, cy, r)
 }
 
 impl Layout {
+    /// The tetris arena — the default the tests are written against.
     pub fn new(w: usize, h: usize) -> Layout {
-        let ticker_row = h.saturating_sub(1);
+        Layout::for_field(w, h, 10, 20)
+    }
 
-        // Largest mino edge whose 20-mino stack still leaves room for the air,
-        // the weld, the floor and the ticker (10·p rows plus 4 of chrome).
-        let mino_px = [6usize, 4, 2]
+    /// A layout for an arena `cols × rows` minos.
+    pub fn for_field(w: usize, h: usize, cols: usize, rows: usize) -> Layout {
+        // The biggest mino whose arena still clears the chrome rows and leaves
+        // a side column on each flank. Nothing else competes for the space:
+        // there is no scenery to protect, so the game takes what there is.
+        let body = h.saturating_sub(TOP_ROWS + BOTTOM_ROWS);
+        let mino_px = MINO_SIZES
             .into_iter()
-            .find(|&p| 10 * p <= h.saturating_sub(4))
-            .unwrap_or(2);
+            .find(|&p| rows * p / 2 <= body && cols * p + 2 * SIDE_MIN <= w)
+            .or_else(|| {
+                // A frame too narrow for the side columns still gets a game; it
+                // just loses the previews.
+                MINO_SIZES
+                    .into_iter()
+                    .find(|&p| rows * p / 2 <= body && cols * p <= w)
+            })
+            .unwrap_or(MINO_MIN);
 
-        let well_h = 10 * mino_px;
-        let well_w = 10 * mino_px;
+        let arena_h = rows * mino_px / 2;
+        let arena_w = cols * mino_px;
 
-        // Rows left over once the stack, its weld and the ticker are placed.
-        let leftover = h.saturating_sub(well_h + 2);
-        let top_air = ((0.30 * leftover as f32).round() as usize).clamp(1, 6);
-        let floor_rungs = leftover.saturating_sub(top_air);
-        let horizon_row = top_air + well_h;
-        let horizon_idle = (0.44 * h as f32).round() as usize;
-
-        let well_x0 = ((w as f32 - well_w as f32) / 2.0).round() as usize;
-        let scenery_each_side = (w - well_w) / 2;
-        let lanes = ((w as f32 / 26.0).round() as usize).clamp(5, 22);
-
-        let well = Rect {
-            x0: well_x0,
-            y0: top_air,
-            x1: well_x0 + well_w - 1,
-            y1: top_air + well_h - 1,
+        let top = TOP_ROWS + body.saturating_sub(arena_h) / 2;
+        let x0 = w.saturating_sub(arena_w) / 2;
+        let arena = Rect {
+            x0,
+            y0: top,
+            x1: x0 + arena_w.saturating_sub(1),
+            y1: top + arena_h.saturating_sub(1),
         };
-        let grid_rows = (horizon_row + 1, h.saturating_sub(2));
 
-        let (sun_cx, sun_cy_sub, sun_r_sub) = sun_at(w, h, horizon_row);
-
-        // Scenery signs stand in the flanks, hung off the well edges so they
-        // reflow with it. The rect table's exact sign cells are eyeballed from
-        // the mockups and disagree between sizes; these anchors keep the labels
-        // in the correct flank and clear of the well at every width.
-        let well_x1 = well.x1;
-        let sign_top = top_air.max(1);
-        let next = (well_x1 + 4, sign_top);
-        let next_deep = if h >= 50 {
-            5
-        } else if h >= 28 {
-            3
+        let side = w.saturating_sub(arena_w) / 2;
+        let has_side = side >= SIDE_MIN;
+        let left_col = has_side.then_some((2, arena.y0));
+        let right_col = has_side.then_some((arena.x1 + 3, arena.y0));
+        // Each preview costs a mino plus a gap, and the queue may not run past
+        // the arena's own floor.
+        let next_deep = if has_side {
+            (2 * arena.h() / (mino_px + 2)).clamp(1, 5)
         } else {
-            2
-        };
-        let hold = if w >= 100 {
-            let hw = mino_px * 2 + 4;
-            Some((well_x0.saturating_sub(hw + 3).max(1), sign_top))
-        } else {
-            None
-        };
-        // The stats stack begins below the full NEXT queue so the 7-seg values
-        // never collide with the queued minos (both hang off the same column).
-        // Queue bottom in sub-rows: label (7) + (deep-1) gaps of (p+2) + one mino.
-        let next_end_sub = 2 * sign_top + 7 + (next_deep - 1) * (mino_px + 2) + mino_px;
-        let score = (well_x1 + 4, next_end_sub / 2 + 2);
-        // A label + 7-seg block is exactly 7 rows: 5 sub-rows of small text at
-        // the top, the digits 7 sub-rows below it, themselves 7 sub-rows tall.
-        // Pitching the stack at that same 7 would put every label on the
-        // previous value, so the pitch carries a row of air.
-        const BLOCK_ROWS: usize = 7;
-        let block = BLOCK_ROWS + 1;
-        // Three stacked blocks reach `2*block + BLOCK_ROWS` below the first, and
-        // must still clear the ticker; otherwise LINES/LVL fold onto one row.
-        let compact_stats = score.1 + 2 * block + BLOCK_ROWS >= ticker_row;
-        let (lines, level) = if compact_stats {
-            ((score.0, score.1 + block), (score.0, score.1 + block))
-        } else {
-            ((score.0, score.1 + block), (score.0, score.1 + 2 * block))
+            0
         };
 
         Layout {
             w,
             h,
             mino_px,
-            well,
-            well_x0,
-            well_w,
-            well_h,
-            horizon_row,
-            horizon_idle,
-            top_air,
-            floor_rungs,
-            grid_rows,
-            scenery_each_side,
-            lanes,
-            sun_cx,
-            sun_cy_sub,
-            sun_r_sub,
-            sun_center_row: (sun_cy_sub / 2.0).round() as usize,
-            sun_radius_rows: (sun_r_sub / 2.0).round() as usize,
-            selector_center_col: w / 2,
-            dot_strip_row: horizon_row + 1,
-            hold,
-            next,
+            cols,
+            rows,
+            arena,
+            strip_sub: 0,
+            rule_sub: 2 * TOP_ROWS - 1,
+            // The ticker hangs off the bottom of the frame, which is the only
+            // way a five-sub-row face fits the last row.
+            ticker_sub: 2 * h.saturating_sub(3),
+            side,
+            left_col,
+            right_col,
             next_deep,
-            score,
-            lines,
-            level,
-            compact_stats,
-            ticker_row,
         }
+    }
+
+    /// Top-left sub-pixel of arena cell `(col, row)`, displaced by `shake`
+    /// sub-rows. Rows may sit above the arena while a piece rains in, so this
+    /// takes signed coordinates and lets the writers clip.
+    pub fn cell_origin(&self, col: i32, row: i32, shake: i32) -> (i32, i32) {
+        let p = self.mino_px as i32;
+        (
+            self.arena.x0 as i32 + col * p,
+            2 * self.arena.y0 as i32 + row * p - shake,
+        )
+    }
+
+    /// The arena in sub-pixels: `(x0, y0, x1, y1)`, inclusive, shaken.
+    pub fn arena_sub(&self, shake: i32) -> (i32, i32, i32, i32) {
+        (
+            self.arena.x0 as i32,
+            2 * self.arena.y0 as i32 - shake,
+            self.arena.x1 as i32,
+            2 * (self.arena.y1 as i32 + 1) - 1 - shake,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::games::ALL;
+    use crate::term::MIN_SIZE;
 
-    // SPEC section 2.6, the authoritative rect table. These are cheap and catch
-    // any reflow regression the moment a coordinate drifts.
-
-    #[test]
-    fn matches_rect_table_80x24() {
-        let l = Layout::new(80, 24);
-        assert_eq!(l.mino_px, 2);
-        assert_eq!(l.well, Rect { x0: 30, y0: 1, x1: 49, y1: 20 });
-        assert_eq!(l.horizon_row, 21);
-        assert_eq!(l.top_air, 1);
-        assert_eq!(l.floor_rungs, 1);
-        assert_eq!(l.grid_rows, (22, 22));
-        assert_eq!(l.scenery_each_side, 30);
-        assert_eq!(l.lanes, 5);
-        assert_eq!(l.selector_center_col, 40);
-        assert_eq!(l.dot_strip_row, 22);
-        assert_eq!(l.ticker_row, 23);
-        assert_eq!(l.sun_cx as usize, 40);
-        // HOLD omitted on the narrowest terminal (rect table 80×24).
-        assert!(l.hold.is_none());
+    fn sizes() -> Vec<(usize, usize)> {
+        vec![
+            MIN_SIZE,
+            (100, 30),
+            (120, 30),
+            (160, 44),
+            (200, 50),
+            (270, 62),
+            (400, 100),
+        ]
     }
 
     #[test]
-    fn matches_rect_table_120x30() {
-        let l = Layout::new(120, 30);
-        assert_eq!(l.mino_px, 2);
-        assert_eq!(l.well, Rect { x0: 50, y0: 2, x1: 69, y1: 21 });
-        assert_eq!(l.horizon_row, 22);
-        assert_eq!(l.top_air, 2);
-        assert_eq!(l.floor_rungs, 6);
-        assert_eq!(l.grid_rows, (23, 28));
-        assert_eq!(l.scenery_each_side, 50);
-        assert_eq!(l.lanes, 5);
-        assert_eq!(l.selector_center_col, 60);
-        assert_eq!(l.dot_strip_row, 23);
-        assert_eq!(l.ticker_row, 29);
-        assert_eq!(l.sun_cx as usize, 60);
-        assert!(l.hold.is_some());
-    }
-
-    #[test]
-    fn matches_rect_table_270x62() {
-        let l = Layout::new(270, 62);
-        assert_eq!(l.mino_px, 4);
-        assert_eq!(l.well, Rect { x0: 115, y0: 6, x1: 154, y1: 45 });
-        assert_eq!(l.horizon_row, 46);
-        assert_eq!(l.top_air, 6);
-        assert_eq!(l.floor_rungs, 14);
-        assert_eq!(l.grid_rows, (47, 60));
-        assert_eq!(l.scenery_each_side, 115);
-        assert_eq!(l.lanes, 10);
-        assert_eq!(l.selector_center_col, 135);
-        assert_eq!(l.dot_strip_row, 47);
-        assert_eq!(l.ticker_row, 61);
-        // SPEC section 4.3 sun lands exactly on the rect table here: (135,44)·16.
-        assert_eq!(l.sun_cx as usize, 135);
-        assert_eq!(l.sun_center_row, 44);
-        assert_eq!(l.sun_radius_rows, 16);
-        assert!(l.hold.is_some());
-    }
-
-    #[test]
-    fn only_three_mino_sizes_ever_occur() {
-        for h in 24..=120 {
-            let p = Layout::new(80.max(2 * h), h).mino_px;
-            assert!(p == 2 || p == 4 || p == 6, "mino_px {p} at H={h}");
-        }
-    }
-
-    #[test]
-    fn signs_sit_in_the_correct_flank() {
-        for &(w, h) in &[(120, 30), (270, 62)] {
-            let l = Layout::new(w, h);
-            // NEXT and the score signs stand right of the well.
-            assert!(l.next.0 > l.well.x1);
-            assert!(l.score.0 > l.well.x1);
-            // HOLD, when present, stands left of the well.
-            if let Some((hx, _)) = l.hold {
-                assert!(hx < l.well.x0);
+    fn the_arena_never_leaves_the_frame() {
+        for kind in ALL {
+            for (w, h) in sizes() {
+                let l = kind.layout(w, h);
+                assert!(l.arena.x1 < w, "{kind:?} {w}x{h}: arena runs off the side");
+                assert!(
+                    2 * (l.arena.y1 + 1) <= l.ticker_sub,
+                    "{kind:?} {w}x{h}: arena reaches the ticker"
+                );
+                assert!(
+                    2 * l.arena.y0 > l.rule_sub,
+                    "{kind:?} {w}x{h}: arena covers the strip"
+                );
             }
         }
     }
 
     #[test]
-    fn well_is_centered_and_square_in_minos() {
-        let l = Layout::new(200, 50);
-        assert_eq!(l.well_w, l.well_h);
-        assert_eq!(l.well_w, 10 * l.mino_px);
-        // centred: equal scenery on both flanks (even leftover).
-        assert_eq!(l.well.x0, l.scenery_each_side);
+    fn the_arena_is_centred() {
+        for kind in ALL {
+            for (w, h) in sizes() {
+                let l = kind.layout(w, h);
+                let (left, right) = (l.arena.x0, w - 1 - l.arena.x1);
+                assert!(
+                    left.abs_diff(right) <= 1,
+                    "{kind:?} {w}x{h}: {left} left vs {right} right"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_arena_takes_the_screen() {
+        // The whole point of losing the scenery: on any frame that can afford
+        // it, the game is most of the height rather than a box in a picture.
+        for kind in ALL {
+            for (w, h) in sizes().into_iter().filter(|&(w, h)| w >= 120 && h >= 30) {
+                let l = kind.layout(w, h);
+                let share = l.arena.h() as f32 / h as f32;
+                assert!(share > 0.6, "{kind:?} {w}x{h}: arena is only {share:.2}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_mino_is_always_a_whole_number_of_sub_pixels() {
+        for kind in ALL {
+            for h in 24..=140 {
+                let p = kind.layout((3 * h).max(80), h).mino_px;
+                assert!((MINO_MIN..=10).contains(&p), "mino_px {p} at H={h}");
+            }
+        }
+    }
+
+    #[test]
+    fn side_columns_appear_only_when_they_fit() {
+        for kind in ALL {
+            for (w, h) in sizes() {
+                let l = kind.layout(w, h);
+                assert_eq!(l.right_col.is_some(), l.side >= SIDE_MIN);
+                if let Some((x, _)) = l.right_col {
+                    assert!(x > l.arena.x1 && x < w, "{kind:?} {w}x{h}: column off-frame");
+                }
+                if let Some((x, _)) = l.left_col {
+                    assert!(x < l.arena.x0, "{kind:?} {w}x{h}: column overlaps arena");
+                }
+            }
+        }
     }
 }
