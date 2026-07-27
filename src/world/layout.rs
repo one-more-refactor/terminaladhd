@@ -39,8 +39,11 @@ const BOTTOM_ROWS: usize = 3;
 /// way — a phone held in portrait would otherwise get no game at all.
 const TICKER_FLOOR: usize = 26;
 
-/// One row kept under the arena for the sub-pixel its frame is drawn on.
+/// One row kept under the arena for the sub-pixels its border is drawn on.
 const FRAME_ROOM: usize = 1;
+/// Columns kept either side of the arena for the same reason. The border is two
+/// rules deep, and an arena pushed against the frame edge loses one of them.
+const BORDER: usize = 2;
 
 /// Columns a side column needs. A folded reading is a two-letter label, a
 /// space and up to three digits — fifteen columns — plus the gap that hangs it
@@ -127,7 +130,7 @@ impl Layout {
                 // just loses the previews.
                 MINO_SIZES
                     .into_iter()
-                    .find(|&p| rows * p / 2 <= body && cols * p <= w)
+                    .find(|&p| rows * p / 2 <= body && cols * p + 2 * BORDER <= w)
             })
             .unwrap_or(MINO_MIN);
 
@@ -238,20 +241,22 @@ mod tests {
 
     #[test]
     fn the_arenas_own_frame_fits_too() {
-        // The vector rectangle is drawn a sub-pixel outside the arena on every
-        // side. Off-by-one here is a border that is simply missing.
+        // The border is two rules deep, so it reaches two sub-pixels outside
+        // the arena on every side. Off-by-one here is an edge that is simply
+        // missing down one side of the screen.
+        const REACH: i32 = 2;
         for kind in ALL {
             for (w, h) in sizes() {
                 let l = kind.layout(w, h);
                 let (x0, y0, x1, y1) = l.arena_sub(0);
-                assert!(x0 > 0, "{kind:?} {w}x{h}: left border off-frame");
-                assert!(y0 > 0, "{kind:?} {w}x{h}: top border off-frame");
+                assert!(x0 >= REACH, "{kind:?} {w}x{h}: left border off-frame");
+                assert!(y0 >= REACH, "{kind:?} {w}x{h}: top border off-frame");
                 assert!(
-                    (x1 + 1) < w as i32,
+                    x1 + REACH < w as i32,
                     "{kind:?} {w}x{h}: right border off-frame"
                 );
                 assert!(
-                    (y1 + 1) < 2 * h as i32,
+                    y1 + REACH < 2 * h as i32,
                     "{kind:?} {w}x{h}: bottom border off-frame"
                 );
             }

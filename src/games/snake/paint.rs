@@ -6,8 +6,8 @@
 //! about to be, and how much the next apple is worth.
 
 use crate::games::{Game, Kind};
-use crate::world::cabinet::{flash_arena, floor, frame, readouts, Rule, Stat};
-use crate::world::draw::{add_emis, diamond, link, put_base};
+use crate::world::cabinet::{burst, flash_arena, floor, frame, readouts, Rule, Stat};
+use crate::world::draw::{add_emis, pill, put_base};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
 use crate::world::{hex, Buf, Rgb};
@@ -21,14 +21,36 @@ fn c(v: u32) -> Rgb {
 /// How close the head has to get before the wall ahead of it lights up.
 const WARN_CELLS: i32 = 3;
 
-/// One colour for the whole body.
-///
-/// It used to be a gradient from cyan to magenta with a pulse travelling down
-/// it. On a screen this size a gradient under bloom is a smear, and the shape
-/// was doing none of the work. A snake is legible because it is a chain of
-/// parts with holes in them and one solid head — which is how every snake ever
-/// drawn on a small screen has been drawn, and it survived for a reason.
-const BODY: u32 = CYAN;
+/// Head hue to tail hue, through violet rather than through white. A straight
+/// cyan-to-magenta lerp desaturates through the middle, and a snake with a pale
+/// waist reads as a bug rather than as a gradient.
+fn body_color(t: f32) -> Rgb {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.5 {
+        c(CYAN).lerp(c(VIOLET), t * 2.0)
+    } else {
+        c(VIOLET).lerp(c(MAGENTA), (t - 0.5) * 2.0)
+    }
+}
+
+/// Two dark pupils on the head, looking where it is going. Skipped below a
+/// four-sub-pixel mino, where they would eat the whole face.
+fn eyes(b: &mut Buf, x: i32, y: i32, size: i32, dir: Dir) {
+    if size < 4 {
+        return;
+    }
+    let ink = c(VOID);
+    let near = size - 2;
+    let (a, d) = match dir {
+        Dir::Up => ((1, 1), (near, 1)),
+        Dir::Down => ((1, near), (near, near)),
+        Dir::Left => ((1, 1), (1, near)),
+        Dir::Right => ((near, 1), (near, near)),
+    };
+    for (ex, ey) in [a, d] {
+        put_base(b, x + ex, y + ey, ink);
+    }
+}
 
 /// The wall the head is running at, lit in proportion to how little room is
 /// left. This is the only warning the player gets, so it has to arrive before
@@ -77,34 +99,35 @@ fn apple(b: &mut Buf, l: &Layout, g: &Snake, shake: i32, t: f32) {
     let a = g.apple();
     let p = l.mino_px as i32;
     let (x, y) = l.cell_origin(a.at.0, a.at.1, shake);
+    let (cx, cy) = (x as f32 + p as f32 / 2.0, y as f32 + p as f32 / 2.0);
 
-    let Some(ttl) = a.ttl else {
-        // An ordinary morsel: a diamond, because it has to read as not-snake at
-        // a glance and a square cannot.
-        let pulse = 0.8 + 0.2 * (t * 4.0).sin();
-        diamond(b, x, y, p, c(GREEN).mul(pulse), 0.9);
-        return;
+    let (hue, pulse) = match a.ttl {
+        // Urgency is carried by the blink rate, not by dimming: a golden apple
+        // must never be hard to see in the moment it is worth the most.
+        Some(ttl) => {
+            let rate = 6.0 + 18.0 * (1.0 - (ttl / super::GOLD_LIFE).clamp(0.0, 1.0));
+            (c(YELLOW), 0.55 + 0.45 * (t * rate).sin())
+        }
+        None => (c(GREEN), 0.75 + 0.25 * (t * 4.0).sin()),
     };
 
-    // The bonus blinks between a solid block and the same diamond, so it never
-    // disappears outright, and the blink doubles in rate over the last quarter
-    // of its clock. Urgency is carried by the rate, never by dimming: it must
-    // not be hard to see in the moment it is worth the most.
-    let fast = ttl <= super::GOLD_LIFE / 4.0;
-    let rate = if fast { 14.0 } else { 7.0 };
-    if (t * rate).sin() > 0.0 {
-        link(b, x, y, p, c(YELLOW), false, 1.2);
-    } else {
-        diamond(b, x, y, p, c(YELLOW), 1.0);
+    pill(b, x, y, p, hue.mul(0.85 + 0.15 * pulse), 1.0 * pulse);
+    if a.gold {
+        burst(b, cx, cy, p as f32 * 2.2, 0.35 + 0.4 * pulse, hue.mul(0.8));
     }
 }
 
+/// The body, head first. After a crash it burns off from the tail, and the cell
+/// currently going flashes white — the run reads as consumed rather than as
+/// simply switched off.
 fn body(b: &mut Buf, l: &Layout, g: &Snake, shake: i32) {
     let p = l.mino_px as i32;
     let n = g.len().max(1) as f32;
     let death = g.death();
+    // Every segment is drawn part of the way between where it was and where it
+    // is. Whole-cell steps read as a cursor; the same steps interpolated read
+    // as an animal.
     let slide = g.glide();
-    let (ox, oy) = l.cell_origin(0, 0, shake);
     for i in 0..g.len() {
         // Tail-first: the last cell has the largest burn position, so it goes
         // as soon as the dissolve starts.
@@ -112,28 +135,24 @@ fn body(b: &mut Buf, l: &Layout, g: &Snake, shake: i32) {
         if death > 0.0 && death >= burn + 1.0 / n {
             continue;
         }
+        let t = i as f32 / n;
         let (fc, fr) = g.segment_at(i, slide);
+        let (ox, oy) = l.cell_origin(0, 0, shake);
         let x = ox + (fc * p as f32).round() as i32;
         let y = oy + (fr * p as f32).round() as i32;
         let igniting = death > 0.0 && death >= burn;
-        let head = i == 0;
-        // The head is the only part that is filled in and the only part that is
-        // near-white, so which end is which is never a question.
-        let col = if igniting {
-            c(WHITE)
-        } else if head {
-            c(WHITE).lerp(c(BODY), 0.35)
-        } else {
-            c(BODY)
-        };
-        let halo = if igniting {
-            1.5
-        } else if head {
-            0.8
-        } else {
-            0.22
-        };
-        link(b, x, y, p, col, !head && !igniting, halo);
+        let col = if igniting { c(WHITE) } else { body_color(t) };
+        // The head carries the light; the tail is nearly matte, which keeps a
+        // long snake from blooming into one pale rope. On top of that a pulse
+        // runs head to tail — the body is the one thing on screen that is
+        // always there, and a rope that only moves when the snake does is a
+        // rope nobody looks at twice.
+        let wave = ((g.elapsed.as_secs_f32() * 5.0 - t * 6.0).sin() * 0.5 + 0.5).powi(3);
+        let halo = if i == 0 { 0.9 } else { 0.30 * (1.0 - t) + 0.5 * wave };
+        pill(b, x, y, p, col, if igniting { 1.5 } else { halo });
+        if i == 0 && !igniting {
+            eyes(b, x, y, p, g.dir());
+        }
     }
 }
 

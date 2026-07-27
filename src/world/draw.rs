@@ -177,48 +177,6 @@ pub fn capsule(b: &mut Buf, x0: i32, y0: i32, size: i32, fill: Rgb, halo: f32) {
     }
 }
 
-/// A square with its corners knocked off — the shape a morsel has had since
-/// there were only three pixels to draw it in. It reads as *not the snake* at
-/// any size, which is the whole job.
-pub fn diamond(b: &mut Buf, x0: i32, y0: i32, size: i32, fill: Rgb, halo: f32) {
-    let r = size as f32 * 0.5;
-    for dy in 0..size {
-        for dx in 0..size {
-            let ox = (dx as f32 + 0.5 - r).abs();
-            let oy = (dy as f32 + 0.5 - r).abs();
-            if ox + oy <= r {
-                put_base(b, x0 + dx, y0 + dy, fill);
-            }
-        }
-    }
-    if halo > 0.0 {
-        glow_rect(b, x0, y0, size, size, fill.mul(halo * 0.6));
-    }
-}
-
-/// A solid segment with its middle punched out. A chain of these reads as a
-/// body made of parts; the same chain filled in reads as a smear, which is why
-/// every snake ever drawn on a small screen has had holes in it.
-pub fn link(b: &mut Buf, x0: i32, y0: i32, size: i32, fill: Rgb, hollow: bool, halo: f32) {
-    for dy in 0..size {
-        for dx in 0..size {
-            put_base(b, x0 + dx, y0 + dy, fill);
-        }
-    }
-    if hollow && size >= 3 {
-        let hole = (size / 3).max(1);
-        let off = (size - hole) / 2;
-        for dy in 0..hole {
-            for dx in 0..hole {
-                put_base(b, x0 + off + dx, y0 + off + dy, hex(VOID));
-            }
-        }
-    }
-    if halo > 0.0 {
-        glow_rect(b, x0, y0, size, size, fill.mul(halo));
-    }
-}
-
 /// A filled disc in emissive light only — the shockwave and spark primitive.
 pub fn ring(b: &mut Buf, cx: f32, cy: f32, r: f32, thick: f32, col: Rgb) {
     let r0 = (r - thick).max(0.0);

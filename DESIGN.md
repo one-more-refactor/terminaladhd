@@ -152,28 +152,26 @@ the piece was longest ago.
 And the handling was slow. DAS was 133 ms, which is long enough to read as the
 game not listening; it is 100. The soft-drop floor was 25 ms a row and is 15.
 
-## Snake looks like a snake
+## The edge of the field
 
-The body was a gradient from cyan to magenta with a bloom halo, a shimmer
-travelling down it and eyes on the head. It read as a smeary rainbow rope,
-because on a screen this size a gradient under bloom is a smear and none of the
-work was being done by the shape.
+It was a hairline with two sub-pixels of overshoot poking out of each corner.
+The overshoot was meant to read as a bezel and read as whiskers, and one
+sub-pixel under this much bloom is a fuzzy line rather than an edge.
 
-It is one colour now, and the shape does everything: a chain of segments with
-their middles punched out, and one solid, near-white head. That is how every
-snake ever drawn on a small screen has been drawn, and it survived because a
-chain of parts reads as a body while a filled line reads as a smear.
+It is two rules now — a bright inner one that is the actual edge of the field,
+and a dim outer one half a step away. One line reads as a hairline someone
+forgot to finish; two read as a rail with a shadow under it. The corners are
+made of the same rule, run brighter and a little way along both edges, so
+nothing sticks out of the rectangle at all.
 
-The morsel is a diamond rather than a block, because it has to read as
-*not-snake* at a glance and a square cannot. The bonus blinks between a solid
-block and that diamond, at double rate over the last quarter of its clock — so
-it never disappears outright, and the urgency is carried by the rate rather than
-by dimming, since it must not be hard to see in the moment it is worth the most.
+The layout reserves the depth. An arena pushed against the frame edge would
+otherwise lose one of the two rules down that side, which is the sort of thing
+that only shows up at one terminal size and is then very hard to unsee.
 
-And an apple inverts the *inside of the arena* for three frames. The border and
-the strip holding still is what makes it read as the field firing rather than
-the monitor glitching — which is also why the ordinary apple does not get one of
-the full-screen reactions.
+An apple inverts the *inside* of the arena for three frames. The border and the
+strip holding still is what makes it read as the field firing rather than the
+monitor glitching — which is also why an ordinary apple gets that rather than
+one of the full-screen reactions.
 
 ## Snake glides
 

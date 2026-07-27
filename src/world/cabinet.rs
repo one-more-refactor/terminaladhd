@@ -31,7 +31,14 @@ pub fn ground(b: &mut Buf) {
 
 // ------------------------------------------------------------------- arena
 
-/// The arena's edge, and the bulbs running round it.
+/// The arena's edge, and the lights running round it.
+///
+/// It used to be a hairline with two sub-pixels of overshoot poking out of each
+/// corner. The overshoot was meant to read as a bezel and read as whiskers, and
+/// a single sub-pixel under this much bloom is a fuzzy line rather than an
+/// edge. So: a solid two-deep rule, no overshoot, and the corners are made of
+/// the same rule run brighter and longer rather than of anything sticking out
+/// of them.
 ///
 /// A cabinet's marquee had lights chasing its border, and a static rectangle is
 /// the one thing on this screen that would otherwise never move. `phase` runs
@@ -42,10 +49,42 @@ pub fn ground(b: &mut Buf) {
 /// `ignite` in `0.0..=1.0` drives the whole border toward white — a frame that
 /// flares is the cheapest and loudest way to say a thing just landed.
 pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: f32) {
-    let (x0, y0, x1, y1) = l.arena_sub(shake);
-    let (x0, y0, x1, y1) = (x0 - 1, y0 - 1, x1 + 1, y1 + 1);
-    let col = hue.lerp(c(WHITE), ignite.clamp(0.0, 1.0));
-    let glow = col.mul(0.26 + 0.9 * ignite);
+    let (ax0, ay0, ax1, ay1) = l.arena_sub(shake);
+    let ignite = ignite.clamp(0.0, 1.0);
+    let col = hue.lerp(c(WHITE), ignite);
+
+    // Two rules: the inner one is the edge of the field, the outer one is dim
+    // and half a step away. One line reads as a hairline someone forgot to
+    // finish; two read as a rail with a shadow.
+    let inner = (ax0 - 1, ay0 - 1, ax1 + 1, ay1 + 1);
+    let outer = (ax0 - 2, ay0 - 2, ax1 + 2, ay1 + 2);
+    edge(b, outer, col.mul(0.30), col.mul(0.10 + 0.4 * ignite));
+    edge(b, inner, col, col.mul(0.30 + 1.0 * ignite));
+
+    // Corners are the same rule, brighter and run a little way along both
+    // edges. Nothing sticks out of the rectangle.
+    let reach = (l.mino_px as i32 * 2).clamp(4, 12);
+    let hot = col.lerp(c(WHITE), 0.5);
+    for (cx, cy, sx, sy) in [
+        (ax0 - 1, ay0 - 1, 1, 1),
+        (ax1 + 1, ay0 - 1, -1, 1),
+        (ax0 - 1, ay1 + 1, 1, -1),
+        (ax1 + 1, ay1 + 1, -1, -1),
+    ] {
+        for k in 0..reach {
+            let fade = 1.0 - k as f32 / reach as f32;
+            let g = hot.mul(0.5 * fade);
+            lit(b, cx + sx * k, cy, hot, g);
+            lit(b, cx, cy + sy * k, hot, g);
+        }
+    }
+
+    bulbs(b, inner, col, phase);
+}
+
+/// One rectangle of rule, one sub-pixel thick.
+fn edge(b: &mut Buf, rect: (i32, i32, i32, i32), col: Rgb, glow: Rgb) {
+    let (x0, y0, x1, y1) = rect;
     for y in y0..=y1 {
         lit(b, x0, y, col, glow);
         lit(b, x1, y, col, glow);
@@ -54,20 +93,6 @@ pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: 
         lit(b, x, y0, col, glow);
         lit(b, x, y1, col, glow);
     }
-    // Corner nubs: two sub-pixels of overshoot on each diagonal. A plain
-    // rectangle reads as a text-mode box; the overshoot reads as a bezel.
-    for (cx, cy, sx, sy) in [
-        (x0, y0, -1, -1),
-        (x1, y0, 1, -1),
-        (x0, y1, -1, 1),
-        (x1, y1, 1, 1),
-    ] {
-        for k in 1..=2 {
-            lit(b, cx + sx * k, cy, col, glow);
-            lit(b, cx, cy + sy * k, col, glow);
-        }
-    }
-    bulbs(b, (x0, y0, x1, y1), col, phase);
 }
 
 /// How many lights run the border at once, and how long each one's tail is.
