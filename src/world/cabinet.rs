@@ -169,9 +169,13 @@ pub fn floor(b: &mut Buf, l: &Layout, shake: i32, rule: Rule, filled: &dyn Fn(i3
     // Bright enough to clear the posterize floor — at the old IRON level the
     // whole lattice rounded to black and the field read as void.
     let tick = c(IRON).mul(2.6);
+    // On a small frame a cell is three sub-pixels and a pip at every cell is
+    // a third of the field lit: thin to a checkerboard before the furniture
+    // outshines the game.
+    let sparse = l.mino_px < 5;
     for mr in 0..l.rows as i32 {
         for mc in 0..l.cols as i32 {
-            if filled(mc, mr) {
+            if filled(mc, mr) || (sparse && (mc + mr) % 2 == 1) {
                 continue;
             }
             let (cx, cy) = l.cell_origin(mc, mr, shake);

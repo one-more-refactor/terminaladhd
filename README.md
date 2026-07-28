@@ -27,6 +27,7 @@ and the fastest way to stop deciding is to have the machine decide.
 | | |
 |---|---|
 | **BLOCKS** | Guideline tetris — SRS kicks, hold, ghost, T-spins, all-spins, perfect clears, back-to-back and combo. Gravity opens at 355 ms a row and climbs on lines *and* on the clock, so a tidy board is not a way to stay slow — but it floors at 60 ms, because the Guideline curve carried past three minutes is not a game any more. |
+| **BREAKOUT** | The 1976 rules, kept because they are load-bearing: six rows of bricks paying seven at the top and one at the bottom, a ball that speeds up on a hit count and again in the deep rows, a paddle that shrinks the first time you touch the ceiling — and the bounce angle comes from where the ball lands on the face, so the paddle is the only aim there is. Three balls; clearing the wall pays a bonus and rebuilds it faster. |
 | **SNAKE** | The body glides between cells rather than jumping them, which is the whole difference between a snake and a cursor. A 26×14 field — wide, because long runs into tight corners is what snake is. Walls kill, and the one you are running at lights up before you reach it. Six speed tiers, three apples apart, 150 ms a cell down to 75. Apples eaten back to back build a multiplier to 8×, and the numbers are set so the average apple chains and the far corner does not. Every fifth is golden, worth five times its tier and gone in three and a half seconds. |
 
 High scores are kept per game, top ten, in
@@ -36,7 +37,11 @@ High scores are kept per game, top ten, in
 
 It is a cabinet screen, not a picture with a game on it. The ground is black,
 the only light comes from something that is alive, and every pixel is either
-play or feedback for play.
+play or feedback for play — in hard chunks: the picture is posterized to a
+short ladder of levels, the streaks and sparks are fat two-pixel dashes, the
+minos are bordered bricks with knocked corners, and the chrome wordmark is
+silkscreened in flat bands. Nothing on this screen fades smoothly, because
+nothing on a 1983 screen could.
 
 Behind the arena a warp field flies outward from a vanishing point, and it is a
 readout rather than decoration: at rest it drifts, under heat it stretches, and
@@ -120,19 +125,18 @@ repaint or corrupt the screen.
 
 ## Over SSH, and on a phone
 
-Every frame is bytes on a wire. `adhd --bench` measures it: on a 120×34 frame
-the full renderer is about 500 KB/s, and almost all of that is the warp field —
-faint light that bloom spreads over nearly every cell, which a strict
-colour-match then calls a change.
+Every frame is bytes on a wire. `adhd --bench` measures it, and the chunky
+pass turned out to be a bandwidth pass too: flat posterized colour diffs down
+to almost nothing, where the old airbrushed picture nudged half the screen
+every frame.
 
-`--lean` stops re-sending changes nobody can see. Same picture, a fifth of the
-bytes, thirty frames instead of sixty. It is the **default whenever
-`SSH_CONNECTION` is set**, so a phone gets it without being told; `--rich`
-forces the full renderer back on.
+`--lean` halves the frame rate and loosens the colour match on top. It is the
+**default whenever `SSH_CONNECTION` is set**, so a phone gets it without being
+told; `--rich` forces the full renderer back on.
 
 ```
-601 KB/s   local, full
- 90 KB/s   over SSH, lean
+~180 KB/s   local, full, 60 fps
+ ~70 KB/s   over SSH, lean, 30 fps
 ```
 
 It needs 60×24, so a terminal app in landscape is comfortable and portrait

@@ -225,9 +225,10 @@ the same distance reads as an animal, and it is the same game underneath.
 
 ## Balance
 
-Both games are tuned against `blipscreen`'s, which is the version that felt
-right, and the numbers were diffed rather than guessed. Where they differ now it
-is deliberate.
+The first two games are tuned against `blipscreen`'s, which is the version
+that felt right, and the numbers were diffed rather than guessed. Where they
+differ now it is deliberate. Breakout is tuned against 1976, which had no bugs
+to diff.
 
 **Snake.** The speed curve is the reference's exactly: six tiers three apples
 apart, 150 ms a cell down to 75 ms, reached around the fifteenth apple. What had
@@ -410,12 +411,8 @@ so the length of the pattern is the dial and the flip stays.
 `world::crt` is the last pass, and everything in it is an artefact of a real
 cathode-ray tube rather than a filter someone liked:
 
-- **vignette** — the corners of a tube fall away. Cheapest pass, does the most.
 - **fringe** — three guns never landed on the same spot, and the misconvergence
   grew toward the edges, which is why it scales with distance from the centre.
-- **hum** — a band of lifted brightness crawling down the picture, mains
-  frequency beating against the frame rate. The single artefact that most
-  reliably says "this is not a still image".
 - **shake** — the chassis, not the arena. Games already shake their own field.
 - **tear** — lost horizontal hold, in bands rather than rows. Per-row offsets
   read as noise; a band of rows moving together reads as the picture slipping.
@@ -428,10 +425,39 @@ exception is the crash: the death, the dissolve and the settle are one
 continuous thing, and cutting away from it would throw out the part worth
 watching. `Machine::go` cuts, `Machine::slide` does not.
 
+The hum and the vignette are still in the code but dark by default: both are
+smooth, filmic effects, and on the chunked picture (next section) anything
+smooth reads as airbrush. The scanlines and the fringe carry the tube alone.
+
 Ordering in the chain is not arbitrary. The flash is light arriving at the
-glass, so it is first. The guns are behind the glass, so the fringe is next. Hum
-and vignette are properties of the tube. The shake moves the whole chassis. The
-collapse is the power going, and it happens to whatever the screen was showing.
+glass, so it is first. The guns are behind the glass, so the fringe is next.
+The shake moves the whole chassis. The collapse is the power going, and it
+happens to whatever the screen was showing.
+
+## The chunk
+
+Everything on screen is hard pixels now, and it is enforced in the pipeline
+rather than begged of each painter:
+
+- the post pass **posterizes** every channel to eight levels, so a bloom halo
+  becomes concentric flat rings, a fade becomes steps, and nothing on screen
+  can be a colour the palette does not have
+- **dithering is off** — dither exists to hide banding, and the bands are the
+  look
+- **bloom is a rim**, radius two, not an atmosphere
+- the warp field is runs of **two-sub-pixel dashes** with a two-step fade —
+  the taper was never the point of a speed streak, the length was
+- **sparks are fat squares** snapped to the same grid, going bright, dim, gone
+- the chrome wordmark is **silkscreened in six flat bands** instead of
+  airbrushed
+- the minos are **bricks**: a light border with knocked corners, a darker
+  body, a square gleam — the border is what keeps every cell in a stack its
+  own tile instead of a colour region, which is most of what makes an
+  eighties well read as brickwork instead of a bar chart
+
+The rule of thumb the pass enforces: gradients are for readouts (the snake's
+body, the progress rule), and even those step. Anything that fades smoothly is
+telling the player nothing and costing the period everything.
 
 ## One row of chrome
 
@@ -502,6 +528,20 @@ job; the question was only ever how much of the frame it decides has changed.
   would make it a different one. A tetris cabinet solved this by standing its
   monitor on end, and there is no equivalent of that here. So the well is as
   large as the height allows and the flanks stay black.
+
+## The third game
+
+BREAKOUT went on the wheel in one evening, which was the test of the seam: a
+`Kind` variant, a module with the logic, a painter, and nothing else moved.
+Its rules are the 1976 originals because they are load-bearing — the ball
+speeds up on a hit count and again at the deep rows, the paddle shrinks the
+first time the ball touches the ceiling, and the bounce angle comes from where
+the ball lands on the face, which makes the paddle the only aim mechanism in
+the game. Its demo tracks the ball only on the way down, plays deliberately
+off the paddle's shoulder, and has slow hands: competent enough to rally,
+mortal enough that the attract loop always moves on. The balance tests assert
+the paddle can reach the far wall before the fastest legal ball can, because
+an unreachable ball is a coin toss rather than a game.
 
 ## Adding a game
 

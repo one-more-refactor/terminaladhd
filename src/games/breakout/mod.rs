@@ -510,7 +510,9 @@ impl Game for Breakout {
         match self.phase {
             Phase::Serve(ref mut t) => {
                 *t -= dts;
-                let done = *t <= 0.0;
+                // The countdown serves it, or the player does — space or up
+                // is "now", because agency beats a wait even a short one.
+                let done = *t <= 0.0 || input.hard || input.up;
                 // Rides the paddle until it goes.
                 self.ball = (self.paddle, self.paddle_row() as f32 - 0.6);
                 if done {
