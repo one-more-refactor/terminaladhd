@@ -284,6 +284,13 @@ impl Breakout {
     }
 
     fn lose_ball(&mut self) {
+        // A single step() runs several physics sub-steps, and the early return
+        // on `over` only guards the next call — so the ball could cross the
+        // floor again in the same frame that emptied the rack and underflow
+        // balls_left. Once it's over, it's over.
+        if self.over {
+            return;
+        }
         self.hitstop = self.hitstop.max(HITSTOP_LOSS);
         self.punch = self.punch.max(0.6);
         self.shake = self.shake.max(2.0);
