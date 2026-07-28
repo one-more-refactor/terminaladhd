@@ -26,9 +26,9 @@ and the fastest way to stop deciding is to have the machine decide.
 
 | | |
 |---|---|
-| **BLOCKS** | Guideline tetris — SRS kicks, hold, ghost, T-spins, all-spins, perfect clears, back-to-back and combo. Gravity opens at 355 ms a row and climbs on lines *and* on the clock, so a tidy board is not a way to stay slow — but it floors at 60 ms, because the Guideline curve carried past three minutes is not a game any more. |
+| **BLOCKS** | Guideline tetris — SRS kicks, hold, ghost, T-spins, all-spins, perfect clears, back-to-back and combo. Gravity opens at 300 ms a row and climbs on lines *and* on the clock, so a tidy board is not a way to stay slow — but it floors at 100 ms, because a curve carried past three minutes is not a game any more. |
 | **BREAKOUT** | The 1976 rules, kept because they are load-bearing: six rows of bricks paying seven at the top and one at the bottom, a ball that speeds up on a hit count and again in the deep rows, a paddle that shrinks the first time you touch the ceiling — and the bounce angle comes from where the ball lands on the face, so the paddle is the only aim there is. Three balls; clearing the wall pays a bonus and rebuilds it faster. |
-| **SNAKE** | The body glides between cells rather than jumping them, which is the whole difference between a snake and a cursor. A 26×14 field — wide, because long runs into tight corners is what snake is. Walls kill, and the one you are running at lights up before you reach it. Six speed tiers, three apples apart, 150 ms a cell down to 75. Apples eaten back to back build a multiplier to 8×, and the numbers are set so the average apple chains and the far corner does not. Every fifth is golden, worth five times its tier and gone in three and a half seconds. |
+| **SNAKE** | The body glides between cells rather than jumping them, which is the whole difference between a snake and a cursor. A wide field that follows the terminal — because long runs into tight corners is what snake is. Walls kill, and the one you are running at lights up before you reach it. Six speed tiers, three apples apart, 150 ms a cell down to 75. Apples eaten back to back build a multiplier to 8×, and the numbers are set so the average apple chains and the far corner does not. Every fifth is golden, worth five times its tier and gone in three and a half seconds. |
 
 High scores are kept per game, top ten, in
 `$XDG_DATA_HOME/terminaladhd/scores` — or wherever `ADHD_SCORES` points.
@@ -48,14 +48,11 @@ readout rather than decoration: at rest it drifts, under heat it stretches, and
 on a line clear, an apple or a death it punches into hyperspace for a fifth of a
 second and falls back. Play well and the whole screen goes faster.
 
-The rest is the arcade convention, near enough verbatim, because it is chrome
-every player already knows how to read: `1UP` blinking over the live score at
-the top left, the game's name in the middle, `HI` and the record at the right,
-and a hard rail around the arena, which is only an edge — what the walls do to
-you is said by the wall itself, lighting up as you close on it. When a game has
-something to shout — TETRIS, GOLDEN, a
-streak — it takes the middle slot off its own name. A machine talks to you from
-its status strip.
+The chrome is one row: the live score at the left, whatever the game has to
+shout — TETRIS, GOLDEN, a streak — beside it, the wrapped command's last line,
+and the clock at the right. Around the arena is a hard rail, which is only an
+edge — what the walls do to you is said by the wall itself, lighting up as you
+close on it.
 
 Both games share one feel and one grammar. An impact stops the whole machine
 for a few frames, so a Tetris and a swallowed apple land rather than merely
@@ -77,8 +74,8 @@ screen change in the machine is one of those closing and the next one opening.
 Hit something big enough and it takes the horizontal hold with it.
 
 Underneath, the picture is drawn at half-block sub-pixel resolution — each cell
-carries two stacked square pixels via `▀` — in linear light, with 4×4 ordered
-dithering, additive bloom over an emissive buffer, and a damage-tracked diff so
+carries two stacked square pixels via `▀` — in linear light, posterized to eight
+flat levels per channel, additive bloom over an emissive buffer, and a damage-tracked diff so
 only the cells that actually changed are sent. Frames are bracketed in DEC 2026
 synchronized output, so a burst lands at once instead of tearing.
 

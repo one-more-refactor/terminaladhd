@@ -1,9 +1,9 @@
 //! terminaladhd — an arcade for the dead time.
 //!
-//! Hit enter on something slow, and the terminal turns into a synthwave
-//! horizon you can play in until the command comes back. The world is one
-//! continuous scene rather than a set of panels: sky, sun and grid fill every
-//! column at any size, and the game is cut into it.
+//! Hit enter on something slow, and the terminal turns into an arcade
+//! cabinet you can play until the command comes back: a black screen, a warp
+//! field behind the arena, and a wheel that picks the game — then picks a
+//! different one every time you die.
 //!
 //! Three layers, each usable alone:
 //!

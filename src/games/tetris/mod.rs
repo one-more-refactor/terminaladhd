@@ -289,8 +289,8 @@ impl Tetris {
         1 + by_lines.max(by_time)
     }
 
-    /// Seconds a piece takes to fall one row under gravity, on the Guideline
-    /// curve offset to open at level 4.
+    /// Seconds a piece takes to fall one row under gravity, on the geometric
+    /// curve above.
     pub fn fall_seconds(&self) -> f32 {
         let steps = (self.level() - 1).min(40) as i32;
         FALL_REST + (FALL_OPEN - FALL_REST) * FALL_DECAY.powi(steps)
@@ -554,9 +554,14 @@ impl Tetris {
                 _ => Kick::Small,
             });
         }
+        // The banner reads the chain as it stood *before* this lock: the
+        // first Tetris arms back-to-back but is not itself one, and reading
+        // the updated flag bannered "B2B TETRIS" on the opener — the score
+        // was always right, only the shout lied.
+        let was_b2b = self.back_to_back;
         self.back_to_back = back_to_back;
         self.last_action = action;
-        self.bump(action, perfect);
+        self.bump(action, perfect, was_b2b);
 
         if !cleared {
             if lock_out || !self.spawn() {
@@ -596,13 +601,19 @@ impl Tetris {
         self.board.collapse(&rows);
         self.lines += rows.len() as u32;
         if !self.spawn() {
+            // The same death the lock path gets: a block-out after a clear is
+            // still the run ending, and it was ending silently — no stop, no
+            // strobe, the game just wasn't there any more.
             self.over = true;
+            self.punch = 1.0;
+            self.hitstop = self.hitstop.max(HITSTOP_OVER);
+            self.kick = Some(Kick::Death);
         }
     }
 
     /// Raise heat and shake for what just happened. Heat carries the felt
     /// momentum, shake the impact; a single-line clear gets no shake at all.
-    fn bump(&mut self, action: Action, perfect: bool) {
+    fn bump(&mut self, action: Action, perfect: bool, was_b2b: bool) {
         let base = match action {
             Action::Nothing => 0.0,
             Action::LineClear(4) => 0.6,
@@ -630,7 +641,7 @@ impl Tetris {
         // same way — a Tetris should visibly hit harder than a single.
         self.punch = self.punch.max((base + pc + 0.5 * shake / 3.0).min(1.0));
 
-        if let Some(text) = Self::say(action, perfect, self.combo, self.back_to_back) {
+        if let Some(text) = Self::say(action, perfect, self.combo, was_b2b) {
             self.shout = Some((text, 1.0));
         }
     }

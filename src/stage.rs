@@ -170,8 +170,8 @@ impl Quality {
     ///
     /// The hum and the fringe go because they dirty cells nothing asked to
     /// change: the hum sweeps the full width every frame, and the fringe
-    /// rewrites every column with contrast in it. Bloom and the vignette stay;
-    /// they only change when the picture under them does.
+    /// rewrites every column with contrast in it. Bloom stays; it only
+    /// changes when the picture under it does.
     pub const fn lean() -> Quality {
         Quality {
             warp: true,

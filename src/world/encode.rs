@@ -112,9 +112,12 @@ fn sgr_both(o: &mut Vec<u8>, fg: [u8; 3], bg: [u8; 3]) {
 
 fn goto(o: &mut Vec<u8>, row: usize, col: usize) {
     o.extend_from_slice(b"\x1b[");
-    push_u8(o, (row + 1) as u8);
+    // Clamped, not truncated: a row past 254 would wrap to the top of the
+    // screen and scramble the frame on very tall terminals; the size cap
+    // keeps this theoretical, and the clamp keeps it harmless.
+    push_u8(o, (row + 1).min(255) as u8);
     o.push(b';');
-    let c = col + 1;
+    let c = (col + 1).min(999);
     if c >= 100 {
         o.push(b'0' + (c / 100) as u8);
         o.push(b'0' + ((c / 10) % 10) as u8);
@@ -195,9 +198,15 @@ pub fn enc_stateful(cells: &[Cell], w: usize, h: usize, tol: i32, o: &mut Vec<u8
 /// Damage-tracked: compare against the previously presented frame and repaint
 /// only cells that differ, jumping the cursor over untouched spans. `gap` is
 /// the number of unchanged cells it is still cheaper to repaint than to skip.
+/// `prev` is what is actually on the terminal, and this function keeps it
+/// true: painted cells are written back, skipped cells keep their old value.
+/// Diffing intended-against-intended instead let a slow fade walk under the
+/// tolerance one step at a time and leave the screen permanently a few
+/// shades stale, because every comparison was against a picture that was
+/// never painted.
 pub fn enc_diff(
     cells: &[Cell],
-    prev: &[Cell],
+    prev: &mut [Cell],
     w: usize,
     h: usize,
     tol: i32,
@@ -242,6 +251,7 @@ pub fn enc_diff(
             // position-independent -- no need to reset them
             for k in start..=end {
                 let c = cells[row + k];
+                prev[row + k] = c;
                 let need_fg = c.half && !cur_fg.is_some_and(|p| near(p, c.fg, tol));
                 let need_bg = !cur_bg.is_some_and(|p| near(p, c.bg, tol));
                 match (need_fg, need_bg) {

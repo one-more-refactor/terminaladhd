@@ -62,11 +62,22 @@ impl Command {
             let line = Arc::clone(&line);
             let tail = Arc::clone(&tail);
             std::thread::spawn(move || {
-                let reader = BufReader::new(stderr);
-                for raw in reader.lines().map_while(Result::ok) {
-                    let clean = sanitize(&raw);
+                // By hand rather than `lines()`, for three promises that
+                // iterator cannot keep: a line is capped *while it arrives*
+                // (a child that never prints a newline must not grow a buffer
+                // for its whole run — a 200 MB single line was a measured
+                // abort), `\r` ends a line too (progress bars redraw with
+                // carriage returns and would otherwise never surface), and
+                // invalid UTF-8 is replaced instead of killing the thread —
+                // `map_while(Result::ok)` silently froze the ticker at the
+                // first non-UTF-8 byte and lost every line after it.
+                let mut reader = BufReader::new(stderr);
+                let mut raw: Vec<u8> = Vec::with_capacity(LINE_CAP);
+                let flush = |raw: &mut Vec<u8>| {
+                    let clean = sanitize(&String::from_utf8_lossy(raw));
+                    raw.clear();
                     if clean.trim().is_empty() {
-                        continue;
+                        return;
                     }
                     if let Ok(mut t) = tail.lock() {
                         t.push(clean.clone());
@@ -76,7 +87,22 @@ impl Command {
                     if let Ok(mut l) = line.lock() {
                         *l = clean;
                     }
+                };
+                loop {
+                    let chunk = match reader.fill_buf() {
+                        Ok([]) | Err(_) => break,
+                        Ok(chunk) => chunk.to_vec(),
+                    };
+                    for &b in &chunk {
+                        if b == b'\n' || b == b'\r' {
+                            flush(&mut raw);
+                        } else if raw.len() < 4 * LINE_CAP {
+                            raw.push(b);
+                        }
+                    }
+                    reader.consume(chunk.len());
                 }
+                flush(&mut raw);
             });
         }
 
@@ -85,12 +111,17 @@ impl Command {
             let code = Arc::clone(&code);
             std::thread::spawn(move || {
                 let status = child.wait();
-                // A signal death has no exit code; 130 is the shell's own
-                // convention for it, and something must be reported.
-                code.store(
-                    status.ok().and_then(|s| s.code()).unwrap_or(130),
-                    Ordering::SeqCst,
-                );
+                // A signal death has no exit code; the shell's convention is
+                // 128 plus the signal number (137 for a KILL), and matching
+                // it means scripts around us see what a shell would show.
+                let code_of = |status: std::process::ExitStatus| {
+                    use std::os::unix::process::ExitStatusExt;
+                    status
+                        .code()
+                        .or_else(|| status.signal().map(|s| 128 + s))
+                        .unwrap_or(130)
+                };
+                code.store(status.map(code_of).unwrap_or(130), Ordering::SeqCst);
                 done.store(true, Ordering::SeqCst);
             });
         }

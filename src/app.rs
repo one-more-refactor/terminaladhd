@@ -247,6 +247,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
     let mut frame_no: u32 = 0;
 
     let mut term_size = (w0, h0);
+    let mut small_said = false;
+    // Presses that arrived while the machine was frozen, owed to the first
+    // step after it thaws.
+    let mut banked = Keys::default();
     let mut accumulator = Duration::ZERO;
     let mut last = Instant::now();
     // Render frames the whole machine is frozen for. An impact that stops time
@@ -262,6 +266,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
 
         let poll = pad.poll()?;
         if let Some((cw, ch)) = poll.resize {
+            // Clamped before anything is built from it: a resize event is a
+            // number from outside, and 65535×65535 is a hundred-gigabyte
+            // stage and an allocation abort that skips every restore hook.
+            let (cw, ch) = term::clamp_size(cw, ch);
             term_size = (cw, ch);
             if cw >= term::MIN_SIZE.0 && ch >= term::MIN_SIZE.1 && (cw != stage.w || ch != stage.h)
             {
@@ -281,15 +289,26 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             break Exit::Finished;
         }
 
-        // A frame that shrank under the minimum cannot be drawn at all. Saying
-        // so beats drawing the old size into a smaller window, which is what
-        // ignoring it used to do.
+        // A frame that shrank under the minimum cannot be drawn at all — and
+        // it cannot be *told* so with a rendered screen either, because any
+        // stage the machine still holds is larger than the terminal and would
+        // wrap into the same garbage it is trying to explain. One plain line,
+        // written once, is the whole message; play resumes when the window
+        // comes back.
         if stage.w > term_size.0 || stage.h > term_size.1 {
-            stage.too_small();
-            presenter.frame(&stage.cells, &prev, stage.w, stage.h)?;
-            prev.copy_from_slice(&stage.cells);
+            if !small_said {
+                term::say_too_small(term_size.0, term_size.1)?;
+                small_said = true;
+                // Whatever was on screen is gone; repaint from nothing when
+                // the window returns.
+                prev.fill(UNPAINTED);
+            }
             std::thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
             continue;
+        }
+        if small_said {
+            small_said = false;
+            term::clear()?;
         }
 
         // Esc leaves the game for the attract screen, and leaves the attract
@@ -303,6 +322,11 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                 Mode::Help { playing } => machine.slide(leave_help(playing)),
                 Mode::Paused => machine.slide(Mode::Play),
                 _ => {
+                    // Esc means "enough", not "erase me": a run someone walks
+                    // away from is still a run, and it files like any other.
+                    if matches!(machine.mode, Mode::Play) {
+                        scores.submit(kind, game.score());
+                    }
                     machine.go(Mode::Attract {
                         since: Instant::now(),
                     });
@@ -327,10 +351,14 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
         last = now;
 
         // Time does not accumulate during hitstop: it is a debt paid in whole
-        // render frames, not wall time the sim owes itself afterwards.
+        // render frames, not wall time the sim owes itself afterwards. The
+        // *input* of those frames is banked, not dropped — a turn tapped in
+        // the 50 ms an apple freezes the world used to simply vanish, which
+        // is the one thing the whole taps design promised could not happen.
         if freeze > 0 {
             freeze -= 1;
             accumulator = Duration::ZERO;
+            banked.merge(&poll.keys);
         }
         let mut steps = 0;
         while freeze == 0 && !closing && accumulator >= STEP && steps < MAX_STEPS {
@@ -340,7 +368,11 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             // Only the first step of a frame sees the input: catch-up steps run
             // neutral, so a hard drop never fires twice off one keypress.
             let keys = if steps == 0 {
-                poll.keys
+                // Banked presses first: they happened earlier, and taps are
+                // ordered.
+                let mut keys = std::mem::take(&mut banked);
+                keys.merge(&poll.keys);
+                keys
             } else {
                 Keys::default()
             };
@@ -488,8 +520,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             }
         }
 
-        presenter.frame(&stage.cells, &prev, stage.w, stage.h)?;
-        prev.copy_from_slice(&stage.cells);
+        // The presenter keeps `prev` faithful to what was painted; copying
+        // the intended frame over it instead let sub-tolerance drift go stale
+        // on screen forever.
+        presenter.frame(&stage.cells, &mut prev, stage.w, stage.h)?;
 
         std::thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
     };
@@ -522,7 +556,7 @@ fn advance(s: Sim) {
             }
             let start = s.keys.skip();
             let auto = s.host.autostart() && since.elapsed() >= AUTOSTART;
-            if start || auto {
+            if start {
                 // The coin goes in behind a cut of its own, and the wheel it
                 // will turn is decided now so the credit screen is already
                 // holding the answer it has not shown yet.
@@ -534,6 +568,12 @@ fn advance(s: Sim) {
                     age: 0.0,
                     next: reel,
                 });
+            } else if auto {
+                // A wrapped command autostarts, and nobody put a coin in: the
+                // ceremony's seconds come out of a build that may only have
+                // ten, so an autostart goes straight to the wheel. The coin
+                // stays for hands.
+                s.machine.go(spin_to(pick(s.rng, None), s.rng));
             }
         }
         Mode::Coin { age, next } => {
@@ -557,8 +597,16 @@ fn advance(s: Sim) {
             if *age >= travel + SPIN_HOLD {
                 let landed = *reel.last().unwrap_or(&Kind::Tetris);
                 *s.kind = landed;
-                s.stage.retarget(landed, s.game.field());
+                // Spawn first, retarget after: the layout must be cut for the
+                // game that is about to play, and `field()` on the old game
+                // hands back the arena the wheel just spun away from. That
+                // ordering was the worst bug this machine has shipped — every
+                // game after the first was painted through the previous
+                // game's layout, and landing on the ten-wide well through a
+                // twenty-six-wide snake field walked the painter straight off
+                // the board.
                 *s.game = landed.spawn(Rng::new(), s.stage.w, s.stage.h);
+                s.stage.retarget(landed, s.game.field());
                 *s.played = Duration::ZERO;
                 s.machine.go(Mode::Play);
             }
@@ -700,6 +748,60 @@ fn input(k: &Keys) -> Input {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The regression every screenshot harness missed, because `--shot`
+    /// builds each screen with its own correct layout: drive the *live*
+    /// machine through the wheel onto every game after every other game, and
+    /// paint each one. Before the spawn/retarget order fix, landing on the
+    /// ten-wide well through a snake-shaped layout panicked the painter.
+    #[test]
+    fn every_game_lands_with_its_own_layout_and_paints() {
+        let (w, h) = (120, 34);
+        let mut rng = Rng::from_seed(5);
+        let mut scores = Table::default();
+        let mut played = Duration::ZERO;
+        let tick = Tick {
+            left: String::new(),
+            right: String::new(),
+        };
+
+        for &from in ALL.iter() {
+            for &to in ALL.iter() {
+                let mut kind = from;
+                let mut game = from.spawn(Rng::from_seed(1), w, h);
+                let mut stage = Stage::new(from, game.field(), w, h);
+                let mut machine = Machine::new(spin_to(to, &mut rng));
+
+                let mut steps = 0;
+                while !matches!(machine.mode, Mode::Play) {
+                    machine.cut(0.016);
+                    advance(Sim {
+                        machine: &mut machine,
+                        kind: &mut kind,
+                        game: &mut game,
+                        stage: &mut stage,
+                        scores: &mut scores,
+                        rng: &mut rng,
+                        played: &mut played,
+                        keys: &Keys::default(),
+                        host: &mut Forever,
+                    });
+                    steps += 1;
+                    assert!(steps < 2000, "the wheel never landed");
+                }
+
+                assert_eq!(kind, to, "the wheel landed somewhere else");
+                assert_eq!(
+                    (stage.layout.cols, stage.layout.rows),
+                    game.field(),
+                    "{from:?} -> {to:?}: the layout is not the new game's field"
+                );
+                // And the painter survives the arena it was given — this line
+                // is the one that used to walk off the board.
+                stage.game(game.as_ref(), &tick);
+            }
+        }
+    }
 
     #[test]
     fn a_cut_holds_the_sim_until_the_picture_is_gone() {

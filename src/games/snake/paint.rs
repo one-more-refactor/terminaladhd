@@ -12,7 +12,7 @@ use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
 use crate::world::{hex, Buf, Rgb};
 
-use super::{Dir, Snake, COLS, ROWS};
+use super::{Dir, Snake};
 
 fn c(v: u32) -> Rgb {
     hex(v)
@@ -55,15 +55,20 @@ fn eyes(b: &mut Buf, x: i32, y: i32, size: i32, dir: Dir) {
 /// The wall the head is running at, lit in proportion to how little room is
 /// left. This is the only warning the player gets, so it has to arrive before
 /// the mistake rather than with it.
+///
+/// Measured against the *live* arena, not the compile-time one: the field is
+/// width-adaptive, and against the constants the right-wall warning never
+/// fired at all on narrow frames and burned falsely mid-field on wide ones —
+/// the one warning the player gets, dead at exactly the sizes people play.
 fn wall_warning(b: &mut Buf, l: &Layout, g: &Snake, shake: i32) {
     let (hx, hy) = g.head();
     let gap = match g.dir() {
         Dir::Up => hy,
-        Dir::Down => ROWS - 1 - hy,
+        Dir::Down => g.rows() - 1 - hy,
         Dir::Left => hx,
-        Dir::Right => COLS - 1 - hx,
+        Dir::Right => g.cols() - 1 - hx,
     };
-    if gap > WARN_CELLS {
+    if !(0..=WARN_CELLS).contains(&gap) {
         return;
     }
     let heat = 1.0 - gap as f32 / (WARN_CELLS + 1) as f32;

@@ -32,8 +32,8 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Breakout) {
 
     floor(b, l, shake, Rule::None, &|_, _| false);
 
-    // The frame runs the game's own violet, chases faster with heat, and
-    // ignites when a wall has just gone (the punch is still high).
+    // The frame runs the game's own violet and chases faster with heat; the
+    // wall going is said by the strobe the Huge kick fires, not by the rail.
     let chase = g.elapsed * (0.45 + 1.6 * g.heat());
     frame(b, l, shake, Kind::Breakout.hue(), 0.0, chase);
 

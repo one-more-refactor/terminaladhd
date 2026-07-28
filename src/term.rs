@@ -36,6 +36,17 @@ pub const FALLBACK_SIZE: (usize, usize) = (120, 34);
 /// held in portrait wants.
 pub const MIN_SIZE: (usize, usize) = (60, 24);
 
+/// And above this nothing is a terminal any more. A size report is attacker
+/// input as far as allocation is concerned: a claimed 65535×65535 frame is a
+/// hundred-gigabyte buffer and an allocation abort that skips every restore
+/// hook, so anything past the cap is clamped rather than believed.
+pub const MAX_SIZE: (usize, usize) = (1024, 512);
+
+/// Clamp a reported size to what the machine will actually build.
+pub fn clamp_size(w: usize, h: usize) -> (usize, usize) {
+    (w.min(MAX_SIZE.0), h.min(MAX_SIZE.1))
+}
+
 /// Whether this session came in over the network. A local terminal is a memcpy
 /// away from the screen; an SSH session is paying for every byte, and on a
 /// phone it may be paying in cellular data.
@@ -49,12 +60,15 @@ pub fn attached() -> bool {
     io::stderr().is_terminal()
 }
 
-/// Ask the terminal for its size, falling back to something playable.
+/// Ask the terminal for its size. The answer is reported honestly — a
+/// terminal that says 45×20 *is* 45×20, and the caller's minimum-size check
+/// is the place that says so. Folding "too small" into the fallback here was
+/// a bug with a long shadow: the polite refusal became unreachable for every
+/// real terminal, and a phone in portrait got a 120-column picture sprayed
+/// into 45 columns instead of one line telling it what to do.
 pub fn size() -> (usize, usize) {
     match terminal::size() {
-        Ok((c, r)) if c as usize >= MIN_SIZE.0 && r as usize >= MIN_SIZE.1 => {
-            (c as usize, r as usize)
-        }
+        Ok((c, r)) if c > 0 && r > 0 => clamp_size(c as usize, r as usize),
         _ => FALLBACK_SIZE,
     }
 }
@@ -152,7 +166,7 @@ impl Presenter {
 
     /// One atomic present: DEC 2026 brackets the whole diff so a burst lands as
     /// a single update instead of tearing across the scanout.
-    pub fn frame(&mut self, cells: &[Cell], prev: &[Cell], w: usize, h: usize) -> Result<()> {
+    pub fn frame(&mut self, cells: &[Cell], prev: &mut [Cell], w: usize, h: usize) -> Result<()> {
         enc_diff(cells, prev, w, h, self.tol, GAP, &mut self.body);
         self.out.clear();
         self.out.extend_from_slice(b"\x1b[?2026h");
@@ -167,6 +181,21 @@ impl Presenter {
 
 pub fn clear() -> Result<()> {
     io::stderr().execute(terminal::Clear(terminal::ClearType::All))?;
+    Ok(())
+}
+
+/// The one thing said outside the picture: the window has shrunk below the
+/// world's minimum, and any rendered screen would wrap into the very garbage
+/// it was trying to explain.
+pub fn say_too_small(w: usize, h: usize) -> Result<()> {
+    clear()?;
+    let mut err = io::stderr();
+    write!(
+        err,
+        "\x1b[H\x1b[0madhd needs {}x{} - this window is {w}x{h}",
+        MIN_SIZE.0, MIN_SIZE.1
+    )?;
+    err.flush()?;
     Ok(())
 }
 
@@ -284,6 +313,29 @@ impl Keys {
     pub fn skip(&self) -> bool {
         self.any() && !self.pause && !self.help
     }
+
+    /// Fold another frame's keys into this one — what the loop does with
+    /// presses that arrive during hitstop, so a freeze banks input instead of
+    /// eating it. Edges OR together; the other frame's taps queue behind this
+    /// one's.
+    pub fn merge(&mut self, other: &Keys) {
+        self.left |= other.left;
+        self.right |= other.right;
+        self.down |= other.down;
+        self.up |= other.up;
+        self.cw |= other.cw;
+        self.ccw |= other.ccw;
+        self.hard |= other.hard;
+        self.hold |= other.hold;
+        self.enter |= other.enter;
+        self.back |= other.back;
+        self.pause |= other.pause;
+        self.help |= other.help;
+        self.quit |= other.quit;
+        for t in other.taps.iter() {
+            self.taps.push(t);
+        }
+    }
 }
 
 /// Everything the terminal reported since the last frame.
@@ -320,9 +372,17 @@ pub struct Pad {
 
 impl Pad {
     /// Turn on key-release reporting if the terminal has it, and say so.
+    ///
+    /// Not over the network: the capability probe writes a query and waits
+    /// for an answer, and crossterm's deadline for that answer is two full
+    /// seconds. A phone SSH client that ignores the query therefore spent two
+    /// seconds on a frozen black alternate screen before the first frame —
+    /// which reads as "it hung", and is paid for a protocol essentially no
+    /// SSH-from-a-phone terminal speaks. Locally every terminal answers in
+    /// microseconds, so the probe stays.
     pub fn open() -> Pad {
         Pad {
-            releases: enable_key_release(),
+            releases: !remote() && enable_key_release(),
             held: [false; DIRS],
             seen: [None; DIRS],
         }

@@ -87,7 +87,7 @@ need**. There is no scenery to protect any more, so the game gets the screen.
 
 Two constants come out of hard arithmetic rather than taste:
 
-- **`MIN_SIZE` is 80×26.** A twenty-row playfield at the smallest legible block
+- **`MIN_SIZE` is 60×24.** A twenty-row playfield at the smallest legible block
   is twenty rows. The status face is five sub-rows and a cell is two, so the
   strip and the ticker need three rows each. Twenty-six. No arrangement of the
   chrome gets it lower without a second, shorter font.
@@ -498,7 +498,7 @@ frames of real play and counts the diff. On a 120×34 frame:
 The result is not what it looks like from the code. The CRT passes are nearly
 free — the hum costs two hundred bytes a frame and the fringe measures as zero,
 because it only rewrites cells that were already being re-sent. **The warp field
-is ninety-three per cent of the traffic**, and not because it is large: it is
+is roughly a third of the traffic**, and not because it is large: it is
 faint, and bloom spreads that faintness across almost every cell, and a
 two-level colour-match tolerance calls almost every one of those a change.
 
@@ -515,8 +515,9 @@ job; the question was only ever how much of the frame it decides has changed.
 
 ## Things that were deliberately not done
 
-- **A third game.** Two games done properly beat three done adequately, and the
-  rotation reads as variety at two.
+- ~~**A third game.**~~ This held until BREAKOUT earned its slot — see "The
+  third game" below; the bar it had to clear was being done properly, not
+  merely existing.
 - **Configurable keybindings.** A TOML file is a decision, and see the premise.
 - **A menu, difficulty select, or game modes.** Same reason.
 - **Screen curvature.** It is the one CRT artefact that would have to resample

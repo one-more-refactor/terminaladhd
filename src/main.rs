@@ -28,7 +28,7 @@ usage: adhd [--size WxH] [-- <command>...]
   adhd --size 120x34      force a size instead of asking the terminal
 
 The machine picks the game. Every time you die it spins and picks another,
-shows you where the run placed, and starts the next one. Needs 80x26.
+shows you where the run placed, and starts the next one. Needs 60x24.
 
 keys: wasd, arrows or hjkl steer; x or up rotates, z counter-rotates,
       space hard drops, c holds, p pauses, ? shows them all,
@@ -38,6 +38,8 @@ keys: wasd, arrows or hjkl steer; x or up rotates, z counter-rotates,
                         Over SSH lean is the default: it is a fifth of the
                         bytes and half the frames, for the same picture.
   --bench               report what a frame costs down a wire
+  --shot DIR            dump every screen as PPM and exit
+  --version             print the version and exit
 
 env:  ADHD_SCORES        where the high-score table lives
                          (default $XDG_DATA_HOME/terminaladhd/scores)";
@@ -71,7 +73,18 @@ fn parse(argv: Vec<String>) -> Result<Args> {
                 let (w, h) = v
                     .split_once(['x', 'X'])
                     .ok_or_else(|| anyhow::anyhow!("--size wants WxH, got {v:?}"))?;
-                out.size = Some((w.trim().parse()?, h.trim().parse()?));
+                let (w, h): (usize, usize) = (w.trim().parse()?, h.trim().parse()?);
+                // The same cap a resize event gets: a number is not a
+                // terminal, and building a screen from an absurd one is an
+                // allocation abort, not a picture.
+                if w > term::MAX_SIZE.0 || h > term::MAX_SIZE.1 {
+                    bail!(
+                        "--size {w}x{h} is past the {}x{} cap",
+                        term::MAX_SIZE.0,
+                        term::MAX_SIZE.1
+                    );
+                }
+                out.size = Some((w, h));
             }
             "--shot" => {
                 out.shot = Some(
@@ -342,9 +355,8 @@ fn bench(w: usize, h: usize) -> Result<()> {
             game.step(&input, Duration::from_millis(16));
             stage.animate(0.016, game.heat());
             stage.game(game.as_ref(), &tick);
-            enc_diff(&stage.cells, &prev, w, h, q.tol, 6, &mut out);
+            enc_diff(&stage.cells, &mut prev, w, h, q.tol, 6, &mut out);
             total += out.len();
-            prev.copy_from_slice(&stage.cells);
         }
         let cpu_ms = started.elapsed().as_secs_f64() * 1000.0 / FRAMES as f64;
         (total / FRAMES, total as f64 * 60.0 / FRAMES as f64, cpu_ms)

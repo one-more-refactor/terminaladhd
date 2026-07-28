@@ -136,8 +136,9 @@ pub struct Snake {
     /// glide between the two is the only thing the eye actually sees.
     prev: VecDeque<(i32, i32)>,
     dir: Dir,
-    /// Turns taken but not yet stepped. Two deep, so a fast double-tap round a
-    /// corner survives — one deep and the second tap is eaten by the first.
+    /// Turns taken but not yet stepped. Three deep, so a fast double corner
+    /// survives with a turn to spare — one deep and the second tap is eaten
+    /// by the first.
     queued: VecDeque<Dir>,
     apple: Apple,
     rng: Rng,
