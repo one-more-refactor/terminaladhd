@@ -6,6 +6,7 @@
 //! how to advance it, and how to paint it. Adding a game means adding a variant
 //! and nothing else.
 
+pub mod breakout;
 pub mod snake;
 pub mod tetris;
 
@@ -16,6 +17,7 @@ use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
 use crate::world::{hex, Buf, Rgb};
 
+pub use breakout::Breakout;
 pub use snake::Snake;
 pub use tetris::Tetris;
 
@@ -195,11 +197,12 @@ pub trait Game {
 pub enum Kind {
     Tetris,
     Snake,
+    Breakout,
 }
 
 /// The order the roulette spins through. Adding a variant here is all it takes
 /// to put a game in rotation.
-pub const ALL: [Kind; 2] = [Kind::Tetris, Kind::Snake];
+pub const ALL: [Kind; 3] = [Kind::Tetris, Kind::Snake, Kind::Breakout];
 
 impl Kind {
     /// The name on the marquee. Kept to the chrome face's alphabet.
@@ -207,6 +210,7 @@ impl Kind {
         match self {
             Kind::Tetris => "BLOCKS",
             Kind::Snake => "SNAKE",
+            Kind::Breakout => "BREAKOUT",
         }
     }
 
@@ -225,6 +229,20 @@ impl Kind {
     pub fn field(self, w: usize, h: usize) -> (usize, usize) {
         match self {
             Kind::Tetris => (10, 20),
+            // Sixteen rows: six of wall, and enough air under it that a
+            // rally is a rally rather than a reflex test. Columns follow the
+            // width the way snake's do.
+            Kind::Breakout => {
+                const ROWS: usize = 16;
+                let body = h.saturating_sub(4);
+                let px = [10usize, 8, 6, 5, 4, 3, 2]
+                    .into_iter()
+                    .find(|&p| ROWS * p / 2 <= body)
+                    .unwrap_or(2);
+                let usable = w.saturating_sub(2 * (18 + 2));
+                let cols = (usable / px).clamp(18, 40);
+                (cols, ROWS)
+            }
             Kind::Snake => {
                 const ROWS: usize = 14;
                 // The same mino the layout will pick, chosen from the height
@@ -257,6 +275,7 @@ impl Kind {
         hex(match self {
             Kind::Tetris => CYAN,
             Kind::Snake => RAIL,
+            Kind::Breakout => VIOLET,
         })
     }
 
@@ -265,6 +284,7 @@ impl Kind {
         match self {
             Kind::Tetris => "WASD OR ARROWS - Z X ROTATE - SPACE DROPS - C HOLDS",
             Kind::Snake => "STEER WITH WASD OR THE ARROWS - THE WALLS BITE",
+            Kind::Breakout => "LEFT AND RIGHT - THE PADDLE IS THE AIM",
         }
     }
 
@@ -276,6 +296,7 @@ impl Kind {
         match self {
             Kind::Tetris => Box::new(Tetris::with_rng(rng)),
             Kind::Snake => Box::new(Snake::with_field(rng, cols as i32, rows as i32)),
+            Kind::Breakout => Box::new(Breakout::with_field(rng, cols as i32, rows as i32)),
         }
     }
 
@@ -292,6 +313,7 @@ impl Kind {
         match self {
             Kind::Tetris => "blocks",
             Kind::Snake => "snake",
+            Kind::Breakout => "breakout",
         }
     }
 }
@@ -304,7 +326,7 @@ mod tests {
     fn every_kind_is_in_the_rotation() {
         // A game missing from ALL would be unreachable while still looking
         // installed — the roulette is the only way in.
-        for k in [Kind::Tetris, Kind::Snake] {
+        for k in [Kind::Tetris, Kind::Snake, Kind::Breakout] {
             assert!(ALL.contains(&k), "{k:?} is not in ALL");
         }
     }

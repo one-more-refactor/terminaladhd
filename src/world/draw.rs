@@ -223,6 +223,52 @@ pub fn brick(b: &mut Buf, x0: i32, y0: i32, size: i32, fill: Rgb, halo: f32) {
     }
 }
 
+/// [`brick`]'s rectangular sibling: the same light border with knocked
+/// corners, body shadow and top-left gleam, on a `w × h` slab — a breakout
+/// brick is twice as wide as it is tall, and a paddle is wider still.
+pub fn slab(b: &mut Buf, x0: i32, y0: i32, w: i32, h: i32, fill: Rgb, halo: f32) {
+    if w < 4 || h < 4 {
+        // Too small for furniture: flat with a top highlight.
+        let hi = fill.lerp(hex(WHITE), 0.3);
+        for dy in 0..h {
+            for dx in 0..w {
+                put_base(b, x0 + dx, y0 + dy, if dy == 0 { hi } else { fill });
+            }
+        }
+        if halo > 0.0 {
+            glow_rect(b, x0, y0, w, h, fill.mul(halo));
+        }
+        return;
+    }
+    let edge = fill.lerp(hex(WHITE), 0.55);
+    let corner = fill.mul(0.35);
+    let body = fill.mul(0.80);
+    let shade = fill.mul(0.45);
+    let gleam = fill.lerp(hex(WHITE), 0.9);
+    let g = (h / 4).max(1);
+    for dy in 0..h {
+        for dx in 0..w {
+            let on_x = dx == 0 || dx == w - 1;
+            let on_y = dy == 0 || dy == h - 1;
+            let col = if on_x && on_y {
+                corner
+            } else if on_x || on_y {
+                edge
+            } else if dx >= w - 2 || dy >= h - 2 {
+                shade
+            } else if dx <= g && dy <= g {
+                gleam
+            } else {
+                body
+            };
+            put_base(b, x0 + dx, y0 + dy, col);
+        }
+    }
+    if halo > 0.0 {
+        glow_rect(b, x0, y0, w, h, fill.mul(halo));
+    }
+}
+
 /// A filled disc in emissive light only — the shockwave and spark primitive.
 pub fn ring(b: &mut Buf, cx: f32, cy: f32, r: f32, thick: f32, col: Rgb) {
     let r0 = (r - thick).max(0.0);
