@@ -251,6 +251,9 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
     // Presses that arrived while the machine was frozen, owed to the first
     // step after it thaws.
     let mut banked = Keys::default();
+    // Whether the live run has already celebrated crossing the all-time
+    // best, so it fires exactly once per run.
+    let mut record_live = false;
     let mut accumulator = Duration::ZERO;
     let mut last = Instant::now();
     // Render frames the whole machine is frozen for. An impact that stops time
@@ -457,10 +460,17 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
         }
 
         let right = clock(played);
-        let tick = Tick {
-            left: host.status(),
-            right,
-        };
+        // With no command to report, the ticker carries the number the run is
+        // actually chasing — the arcade convention, and the cheapest
+        // addictive loop there is: the target rides along the whole game.
+        let mut left = host.status();
+        if left.is_empty() {
+            let best = scores.best(kind);
+            if best > 0 {
+                left = format!("HI {best}");
+            }
+        }
+        let tick = Tick { left, right };
 
         // The demo plays itself only while it is on screen, and a demo that
         // tops out is replaced with a different game rather than restarted —
@@ -497,6 +507,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             }
             Mode::Coin { age, .. } => stage.coin(demo.as_ref(), *age, &tick),
             Mode::Spin { reel, age } => {
+                record_live = false;
                 let t = (age / SPIN_TIME.as_secs_f32()).clamp(0.0, 1.0);
                 // Ease out to the fifth: nearly all the travel is spent in the
                 // first third and the last few slots crawl past, which is the
@@ -505,7 +516,18 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                 stage.slam = (stage.slam - 0.12).max(0.0);
                 stage.spin(reel, travel, &tick);
             }
-            Mode::Play => stage.game(game.as_ref(), &tick),
+            Mode::Play => {
+                // The record fires the moment it happens, not at the autopsy:
+                // crossing your own best mid-run is the single best feeling
+                // this machine can sell, and it was being saved for a screen
+                // the run is already dead on.
+                let best = scores.best(kind);
+                if !record_live && best > 0 && game.score() > best {
+                    record_live = true;
+                    stage.fire(strobe::RECORD, hex(YELLOW));
+                }
+                stage.game(game.as_ref(), &tick)
+            }
             Mode::Paused => stage.paused(game.as_ref(), &tick),
             Mode::Help { .. } => stage.help(kind, &tick),
             Mode::Over { age, score, rank } => {

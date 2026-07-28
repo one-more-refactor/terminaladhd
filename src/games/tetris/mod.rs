@@ -148,6 +148,8 @@ pub struct Tetris {
     /// Consecutive line-clearing pieces; a clean lock breaks it.
     combo: u32,
     back_to_back: bool,
+    /// The last level announced, so a climb is shouted exactly once.
+    last_level: u32,
     elapsed: Duration,
     heat: f32,
     shake: f32,
@@ -194,6 +196,7 @@ impl Tetris {
             lines: 0,
             combo: 0,
             back_to_back: false,
+            last_level: 1,
             elapsed: Duration::ZERO,
             heat: 0.0,
             shake: 0.0,
@@ -311,6 +314,17 @@ impl Tetris {
         self.elapsed = self.elapsed.saturating_add(dt);
         let dts = dt.as_secs_f32();
         self.heat = (self.heat - dts / HEAT_DECAY_SECS).max(0.0);
+        // The level climbing is the game's whole difficulty story, and it
+        // was happening in silence. One line when it happens — and never
+        // over something better already on the banner.
+        let level = self.level();
+        if level > self.last_level {
+            self.last_level = level;
+            self.heat = (self.heat + 0.15).min(1.0);
+            if self.shout.is_none() {
+                self.shout = Some((format!("LEVEL {level}"), 1.0));
+            }
+        }
         self.shake = (self.shake - dts / SHAKE_DECAY_SECS).max(0.0);
         if let Some((_, life)) = &mut self.shout {
             *life -= dts / PRAISE_SECS;
