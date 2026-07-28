@@ -19,18 +19,22 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use crate::encode::enc_diff;
 use crate::games::{Taps, Turn};
-use crate::screen::Cell;
+use crate::world::{enc_diff, Cell};
 
 /// Used when the terminal will not say how big it is (a pipe, a CI log).
 pub const FALLBACK_SIZE: (usize, usize) = (120, 34);
 
-/// The picture is 80×48 pixels and a cell carries two of them, so the floor
-/// is exactly the terminal every terminal has been since terminals: 80×24.
-/// It cannot be negotiated down — there is no smaller version of the picture,
-/// only bigger whole-pixel scales of it.
-pub const MIN_SIZE: (usize, usize) = (80, 24);
+/// Below this the arena does not fit under the status strip. A twenty-row
+/// playfield at the smallest legible block is twenty rows and the strip is
+/// three, because the face is five sub-rows and a cell is two. That is
+/// twenty-three, plus one for the sub-pixel the arena's frame is drawn on. The
+/// only way lower is a second, shorter font.
+///
+/// Between twenty-three and twenty-six there is no room for the ticker, so the
+/// command's output gives way rather than the game — which is the trade a phone
+/// held in portrait wants.
+pub const MIN_SIZE: (usize, usize) = (60, 24);
 
 /// Whether this session came in over the network. A local terminal is a memcpy
 /// away from the screen; an SSH session is paying for every byte, and on a
@@ -121,13 +125,17 @@ fn restore() {
 /// Ships frames to the terminal, reusing its buffers so a frame allocates
 /// nothing.
 ///
-/// The diff has to be encoded into a buffer of its own: [`enc_diff`] clears
-/// its output first, so writing the DEC 2026 introducer into that same buffer
-/// would silently drop it and every frame would tear.
+/// The diff has to be encoded into a buffer of its own: every encoder in
+/// [`crate::world::encode`] clears its output first, so writing the DEC 2026
+/// introducer into that same buffer would silently drop it and every frame
+/// would tear.
 #[derive(Default)]
 pub struct Presenter {
     body: Vec<u8>,
     out: Vec<u8>,
+    /// Matched to the stage's own resolve tolerance, or the diff will re-send
+    /// cells the resolver already decided were the same.
+    pub tol: i32,
 }
 
 /// The run-joining gap: cells this far apart are worth re-addressing rather
@@ -135,14 +143,17 @@ pub struct Presenter {
 const GAP: usize = 6;
 
 impl Presenter {
-    pub fn new() -> Self {
-        Presenter::default()
+    pub fn new(tol: i32) -> Self {
+        Presenter {
+            tol,
+            ..Default::default()
+        }
     }
 
     /// One atomic present: DEC 2026 brackets the whole diff so a burst lands as
     /// a single update instead of tearing across the scanout.
     pub fn frame(&mut self, cells: &[Cell], prev: &[Cell], w: usize, h: usize) -> Result<()> {
-        enc_diff(cells, prev, w, h, 0, GAP, &mut self.body);
+        enc_diff(cells, prev, w, h, self.tol, GAP, &mut self.body);
         self.out.clear();
         self.out.extend_from_slice(b"\x1b[?2026h");
         self.out.extend_from_slice(&self.body);
@@ -156,20 +167,6 @@ impl Presenter {
 
 pub fn clear() -> Result<()> {
     io::stderr().execute(terminal::Clear(terminal::ClearType::All))?;
-    Ok(())
-}
-
-/// The one thing drawn outside the picture: the window has shrunk below the
-/// picture's own size, and there is no smaller picture to fall back to.
-pub fn say_too_small() -> Result<()> {
-    clear()?;
-    let mut err = io::stderr();
-    write!(
-        err,
-        "\x1b[H\x1b[0madhd needs {}x{} — make the window bigger",
-        MIN_SIZE.0, MIN_SIZE.1
-    )?;
-    err.flush()?;
     Ok(())
 }
 
@@ -195,7 +192,12 @@ pub struct Keys {
     pub hard: bool,
     pub hold: bool,
     pub enter: bool,
-    /// Esc or Ctrl-C — leave whatever we are in.
+    pub back: bool,
+    /// Stop the clock without losing the run.
+    pub pause: bool,
+    /// Show the controls.
+    pub help: bool,
+    /// Esc, q or Ctrl-C — leave whatever we are in.
     pub quit: bool,
     /// Direction keys *going down* this frame, in arrival order. The booleans
     /// above are held state; these are the presses themselves, which is what
@@ -241,12 +243,15 @@ impl Keys {
                 self.up = true;
                 self.cw = true;
             }
+            KeyCode::Char('p') | KeyCode::Char('P') if !ctrl => self.pause = true,
+            KeyCode::Char('?') | KeyCode::F(1) => self.help = true,
             KeyCode::Char('x') | KeyCode::Char('X') => self.cw = true,
             KeyCode::Char('z') | KeyCode::Char('Z') => self.ccw = true,
             KeyCode::Char(' ') => self.hard = true,
             KeyCode::Char('c') | KeyCode::Char('C') if ctrl => self.quit = true,
             KeyCode::Char('c') | KeyCode::Char('C') => self.hold = true,
             KeyCode::Enter => self.enter = true,
+            KeyCode::Backspace | KeyCode::Tab => self.back = true,
             // Esc and Ctrl-C only. `q` sits under the same hand as everything
             // else and quitting is the one action with no undo.
             KeyCode::Esc => self.quit = true,
@@ -259,9 +264,7 @@ impl Keys {
         }
     }
 
-    /// Anything the player could have meant as "get on with it" — everything
-    /// except the keys that mean "get me out".
-    pub fn skip(&self) -> bool {
+    pub fn any(&self) -> bool {
         self.left
             || self.right
             || self.down
@@ -271,6 +274,15 @@ impl Keys {
             || self.hard
             || self.hold
             || self.enter
+            || self.back
+    }
+
+    /// Anything the player could have meant as "get on with it". Deliberately
+    /// not [`Keys::any`]: pause and help are requests of their own, and a
+    /// ceremony that skipped because someone asked for the controls would be a
+    /// bug the player could not explain.
+    pub fn skip(&self) -> bool {
+        self.any() && !self.pause && !self.help
     }
 }
 

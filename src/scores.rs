@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(t2.best(Kind::Snake), 300);
         assert_eq!(t2.top(Kind::Snake).len(), 2);
         // Games do not share a board.
-        assert_eq!(t2.best(Kind::Blocks), 0);
+        assert_eq!(t2.best(Kind::Tetris), 0);
         let _ = fs::remove_file(&p);
     }
 
@@ -196,12 +196,12 @@ mod tests {
         let p = temp("keep");
         let mut t = Table::at(&p);
         for i in 1..=20u32 {
-            t.submit(Kind::Blocks, i * 10);
+            t.submit(Kind::Tetris, i * 10);
         }
-        assert_eq!(t.top(Kind::Blocks).len(), KEEP);
-        assert_eq!(t.best(Kind::Blocks), 200);
+        assert_eq!(t.top(Kind::Tetris).len(), KEEP);
+        assert_eq!(t.best(Kind::Tetris), 200);
         // The dropped runs are gone from the file too, not just from the view.
-        assert_eq!(Table::at(&p).top(Kind::Blocks).len(), KEEP);
+        assert_eq!(Table::at(&p).top(Kind::Tetris).len(), KEEP);
         let _ = fs::remove_file(&p);
     }
 

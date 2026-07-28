@@ -2,11 +2,10 @@
 //!
 //! The child is spawned with its stdout inherited — a pipeline downstream of
 //! `adhd -- cmd` must receive the command's bytes untouched and in order. Only
-//! stderr is captured, because that is where progress chatter goes and where
-//! we can afford to hold it back until the picture folds away: on a failure
-//! the tail is replayed, so the alternate screen never swallows the reason.
+//! stderr is captured, because that is where progress chatter goes and where we
+//! can afford to hold it back until the world folds away.
 //!
-//! Two threads: one draining stderr into the tail, one waiting on the child.
+//! Two threads: one draining stderr into the ticker, one waiting on the child.
 //! The loop asks through the [`Command`] host and never blocks on either.
 
 use std::io::{BufRead, BufReader, Write};
@@ -19,17 +18,18 @@ use anyhow::{bail, Context, Result};
 
 use crate::app::Host;
 
-/// After this long the progress hairline is treated as most of the way over.
-/// It is a mood, not a measurement — no command says how far along it is.
+/// After this long with no progress signal the sun is treated as most of the
+/// way down. It is a mood, not a measurement — the ticker carries the truth.
 const PACE: Duration = Duration::from_secs(90);
 
-/// Captured lines are short; anything longer is a hang risk on a chatty build.
+/// Ticker lines are short; anything longer is a hang risk on a chatty build.
 const LINE_CAP: usize = 200;
 
-/// A command running behind the picture.
+/// A command running behind the world.
 pub struct Command {
     started: Instant,
     label: String,
+    line: Arc<Mutex<String>>,
     done: Arc<AtomicBool>,
     code: Arc<AtomicI32>,
     tail: Arc<Mutex<Vec<String>>>,
@@ -52,12 +52,14 @@ impl Command {
             .spawn()
             .with_context(|| format!("could not run {program:?}"))?;
 
+        let line = Arc::new(Mutex::new(format!("$ {}", argv.join(" "))));
         let tail = Arc::new(Mutex::new(Vec::new()));
         let done = Arc::new(AtomicBool::new(false));
         let code = Arc::new(AtomicI32::new(0));
 
         let stderr = child.stderr.take().context("no stderr pipe")?;
         {
+            let line = Arc::clone(&line);
             let tail = Arc::clone(&tail);
             std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
@@ -67,9 +69,12 @@ impl Command {
                         continue;
                     }
                     if let Ok(mut t) = tail.lock() {
-                        t.push(clean);
+                        t.push(clean.clone());
                         let overflow = t.len().saturating_sub(TAIL_LINES);
                         t.drain(..overflow);
+                    }
+                    if let Ok(mut l) = line.lock() {
+                        *l = clean;
                     }
                 }
             });
@@ -90,6 +95,7 @@ impl Command {
         Ok(Command {
             started: Instant::now(),
             label: argv.join(" "),
+            line,
             done,
             code,
             tail,
@@ -122,10 +128,16 @@ impl Command {
 }
 
 impl Host for Command {
-    /// No command tells us how far along it is, so the hairline tracks
-    /// elapsed time against a nominal pace and is deliberately capped short
-    /// of the far edge — a bar that completes before the command does would
-    /// be a lie.
+    fn status(&mut self) -> String {
+        match self.line.lock() {
+            Ok(l) => l.clone(),
+            Err(_) => self.label.clone(),
+        }
+    }
+
+    /// No command tells us how far along it is, so the sun tracks elapsed time
+    /// against a nominal pace and is deliberately capped short of the horizon —
+    /// a sunset that completes before the command does would be a lie.
     fn progress(&mut self) -> Option<f32> {
         let t = self.started.elapsed().as_secs_f32() / PACE.as_secs_f32();
         Some((t.min(1.0) * 0.85).clamp(0.0, 0.85))
@@ -133,6 +145,10 @@ impl Host for Command {
 
     fn finished(&mut self) -> bool {
         self.is_done()
+    }
+
+    fn autostart(&self) -> bool {
+        true
     }
 }
 

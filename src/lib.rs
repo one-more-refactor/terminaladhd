@@ -1,21 +1,21 @@
 //! terminaladhd — an arcade for the dead time.
 //!
-//! The picture is 80×48 one-bit pixels on an arcade monitor's black glass,
-//! drawn with half-block characters and blown up in whole pixels to whatever
-//! the terminal is. A reel picks the game, the game plays until you die, and
-//! the reel turns again.
+//! Hit enter on something slow, and the terminal turns into a synthwave
+//! horizon you can play in until the command comes back. The world is one
+//! continuous scene rather than a set of panels: sky, sun and grid fill every
+//! column at any size, and the game is cut into it.
 //!
-//! The crate splits along one seam: [`games`] is pure logic that draws onto
-//! the [`screen`] canvas, and [`app`] is the machine around it — the reel,
-//! the clock, the monitor and the keys. [`wrap`] runs a command behind all of
-//! it without ever touching the command's stdout.
+//! Three layers, each usable alone:
+//!
+//! - [`world`] — the renderer. Takes a size in cells, hands back bytes.
+//! - [`games`] — pure game logic driven by `step(input, dt)`.
+//! - [`term`] — raw mode, key decoding and a restore that survives a panic.
 
 pub mod app;
-pub mod encode;
-pub mod font;
 pub mod games;
 pub mod rng;
 pub mod scores;
-pub mod screen;
+pub mod stage;
 pub mod term;
+pub mod world;
 pub mod wrap;

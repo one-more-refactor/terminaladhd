@@ -1,91 +1,87 @@
-//! The loop: reel, play, game over, reel again — and the [`Host`] that lets
-//! the same loop serve both the standalone arcade and a wrapped command.
+//! The loop: attract, spin, play, crash, board, spin again — and the [`Host`]
+//! that lets the same loop serve both the standalone arcade and a wrapped
+//! command.
 //!
-//! There is no menu and no attract screen. The machine opens on the reel
-//! already turning, drops you into whatever it lands on, and spins again
-//! every time you die. That rotation is the product: you sat down to wait for
-//! a command, not to run a menu, and the fastest way to stop deciding is to
-//! have the machine decide.
+//! One fixed-timestep clock drives everything. The sim advances in whole 16 ms
+//! steps and the frame is painted from whatever state that leaves, so a slow
+//! terminal drops frames rather than slowing the game down.
 //!
-//! One fixed-timestep clock drives everything. The sim advances in whole
-//! 16 ms steps and the frame is painted from whatever state that leaves, so a
-//! slow terminal drops frames rather than slowing the game down.
+//! The machine never lets you pick. Every crash spins a new game, which is the
+//! point: you sat down to wait for a command, not to run a menu.
 
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crate::games::{Kind, ALL};
+use crate::games::{Game, Input, Kick, Kind, ALL};
 use crate::rng::Rng;
 use crate::scores::Table;
-use crate::screen::{self, Fx, Monitor, Phosphor, Screen};
-use crate::term;
+use crate::stage::{clock, strobe, Quality, Settle, Stage, Tick};
+use crate::world::scene::palette::*;
+use crate::world::hex;
+use crate::term::{self, Keys};
 
-/// One sim step. Small enough that input latency is invisible; the games run
-/// their own millisecond clocks against it.
+/// One sim step. ARR is one step, so the handling machine's real-millisecond
+/// timers land on frame boundaries instead of straddling them.
 pub const STEP: Duration = Duration::from_millis(16);
 /// Never simulate more than this much wall time in one frame: after a suspend
 /// or a laptop lid, catching up in real time would fast-forward the game.
 const MAX_CATCHUP: Duration = Duration::from_millis(250);
 const MAX_STEPS: u32 = 8;
 
-/// The reel steps on its own 50 ms tick, whatever the frame rate is doing —
-/// its physics constants are per-tick and the picture interpolates between
-/// them, which is where the smoothness comes from.
-const REEL_TICK: f32 = 0.05;
-/// Pixel height of one name on the strip: enough air to separate them, tight
-/// enough that the next one is always already showing at the window's lip.
-const SLOT_H: f32 = 14.0;
-/// Opening speed in slots per tick, and how much of it survives each tick.
-/// The throw is spent in about 700 ms — long enough to read as a gamble,
-/// short enough that it never stands between you and playing.
-const REEL_V0: f32 = 1.8;
-const REEL_DECAY: f32 = 0.72;
-/// Hitting a key brakes hard instead of waiting it out.
-const REEL_BRAKE: f32 = 0.55;
-/// Below this the reel has arrived and drops into its detent.
-const REEL_STOP: f32 = 0.02;
-/// How far past the detent the reel carries and rocks back, one entry per
-/// tick after it arrives. A real reel is stopped by a sprung pawl rather than
-/// by arriving, and that little bounce is what says the thing was moving
-/// under its own weight.
-const REEL_SETTLE: [f32; 4] = [0.20, 0.06, -0.02, 0.0];
-/// Ticks the winner is held before the cut — the settle, plus long enough to
-/// read the one line of controls under it.
-const REEL_HOLD: u8 = 18;
+/// How long the attract screen holds before a wrapped command spins the wheel
+/// on its own. Long enough to read the marquee, short enough that it is not in
+/// the way of the thing you actually started.
+const AUTOSTART: Duration = Duration::from_millis(700);
 
-/// Seconds before the game-over screen accepts a skip — a held space (hard
-/// drop) must not blow past the score — and how long it holds before the reel
-/// takes over by itself. Losing costs a glance, not a decision.
-const OVER_GRACE: f32 = 0.4;
-const OVER_HOLD: f32 = 1.4;
+/// How long a credit takes to go in. The one piece of dead time on this machine
+/// that is worth having: a cabinet that started the instant you touched it
+/// never felt like it had accepted anything.
+const COIN_TIME: f32 = 0.55;
 
-/// How long the tube takes to collapse out and to warm back in. A cut between
-/// two things, not a scene of its own.
-const CUT_OUT: f32 = 0.14;
-const CUT_IN: f32 = 0.22;
+/// How long the wheel turns, how long the winner is held after it stops, and
+/// how many slots it travels.
+const SPIN_TIME: Duration = Duration::from_millis(1350);
+const SPIN_HOLD: f32 = 0.42;
+const SPIN_SLOTS: usize = 9;
 
-/// How fast a flash blows off the tube.
-const FLASH_DECAY: f32 = 0.12;
+/// The settle after a crash: how long the picture takes to go down, how long
+/// the score counter takes to climb, and how long the whole thing is held.
+const SINK_TIME: f32 = 0.35;
+const COUNT_TIME: f32 = 0.45;
+const OVER_TIME: f32 = 1.4;
+/// A record is worth looking at for longer than a bad run.
+const OVER_TIME_RECORD: f32 = 2.2;
 
-/// What the diff believes was on screen before the first frame: a cell the
-/// composer can never produce (a half-block with identical halves collapses
-/// to a space), so every cell of the first frame is painted — the black ones
-/// included. Diffing against a default (black) cell instead quietly assumed
-/// the terminal's own background was black, and on a light theme the whole
-/// surround simply never appeared.
-const UNPAINTED: screen::Cell = screen::Cell {
-    half: true,
-    fg: [255, 0, 255],
-    bg: [255, 0, 255],
-};
+/// How long the board stays up before the wheel turns again.
+const BOARD_TIME: f32 = 2.0;
+
+/// How long the tube takes to cut out and to come back. Short: this is a cut
+/// between two things, not a scene of its own.
+const CUT_OUT: f32 = 0.16;
+const CUT_IN: f32 = 0.24;
+
+/// Impact past which the monitor itself is felt — the guns pull apart and the
+/// chassis moves, rather than only the arena shaking.
+const JOLT_FLOOR: f32 = 0.55;
+/// And past which it loses its horizontal hold, for this many frames.
+const TEAR_FLOOR: f32 = 0.8;
+const SYNC_FRAMES: u32 = 7;
+
+/// How long the attract loop holds each of its screens. A cabinet left alone
+/// did not show one picture — it cycled the marquee, the board and a demo, and
+/// that cycle is most of why an idle machine still looked alive from across the
+/// room.
+const ATTRACT_CYCLE: f32 = 5.5;
 
 /// What the loop is running for. The standalone arcade is [`Forever`]; a
 /// wrapped command reports through its own implementation, and the loop ends
 /// when [`Host::finished`] says so.
 pub trait Host {
-    /// `0.0..=1.0`, or `None` when there is no way to know. Drawn as the
-    /// hairline across the top of the picture.
+    /// Left ticker slot: what the machine is doing right now.
+    fn status(&mut self) -> String;
+
+    /// `0.0..=1.0`, or `None` when there is no way to know. Drives the sun.
     fn progress(&mut self) -> Option<f32> {
         None
     }
@@ -94,12 +90,24 @@ pub trait Host {
     fn finished(&mut self) -> bool {
         false
     }
+
+    /// Skip the wait for a keypress and spin the wheel after [`AUTOSTART`].
+    fn autostart(&self) -> bool {
+        false
+    }
 }
 
 /// The arcade with nothing behind it: it runs until the player leaves.
 pub struct Forever;
 
-impl Host for Forever {}
+impl Host for Forever {
+    /// Nothing. There is no command, so there is nothing to report, and a line
+    /// of instructions along the bottom of a game is the sort of thing that is
+    /// read once and then in the way forever.
+    fn status(&mut self) -> String {
+        String::new()
+    }
+}
 
 /// Why the loop returned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,135 +118,13 @@ pub enum Exit {
     Finished,
 }
 
-// -------------------------------------------------------------------- reel
-
-/// A slot-machine reel of game names. No menu, no choosing — you spin, it
-/// lands, you play whatever came up.
-pub struct Reel {
-    /// Position in slots; the fractional part drives the scroll.
-    pos: f32,
-    vel: f32,
-    /// Ticks since the reel stopped, once it has.
-    landed: Option<u8>,
-    /// Progress towards the next 50 ms tick.
-    accum: f32,
-}
-
-impl Reel {
-    fn new(rng: &mut Rng) -> Reel {
-        Reel {
-            // A random start means the same opening speed still lands
-            // somewhere different every time.
-            pos: rng.range(ALL.len() as u32) as f32,
-            vel: REEL_V0,
-            landed: None,
-            accum: 0.0,
-        }
-    }
-
-    /// A reel already at rest on `kind` — for `--shot` stills.
-    #[doc(hidden)]
-    pub fn parked(kind: Kind) -> Reel {
-        Reel {
-            pos: ALL.iter().position(|&k| k == kind).unwrap_or(0) as f32,
-            vel: 0.0,
-            landed: Some(REEL_SETTLE.len() as u8),
-            accum: 0.0,
-        }
-    }
-
-    /// Which game is under the payline right now.
-    fn index(&self) -> usize {
-        (self.pos.round() as i64).rem_euclid(ALL.len() as i64) as usize
-    }
-
-    pub fn kind(&self) -> Kind {
-        ALL[self.index()]
-    }
-
-    /// Where the strip sits for this repaint. The reel steps at 20 Hz but the
-    /// screen paints at 60, and a strip that moves in big jumps reads as a
-    /// flick book rather than as something turning; the tick fraction carries
-    /// it the rest of the way.
-    fn strip(&self) -> f32 {
-        let alpha = (self.accum / REEL_TICK).clamp(0.0, 1.0);
-        match self.landed {
-            Some(held) => {
-                let at = |i: u8| REEL_SETTLE.get(i as usize).copied().unwrap_or(0.0);
-                let from = at(held);
-                self.pos + from + (at(held.saturating_add(1)) - from) * alpha
-            }
-            None => self.pos + self.vel * alpha,
-        }
-    }
-
-    /// The two ticks the window is thrown into reverse video on arrival — the
-    /// pixel half of the payout, the lamp being the other.
-    fn paying(&self) -> bool {
-        matches!(self.landed, Some(held) if held < 2)
-    }
-
-    pub fn has_landed(&self) -> bool {
-        self.landed.is_some()
-    }
-
-    /// Advance by `dt`; returns the winner once it has been held long enough
-    /// to hand over.
-    fn step(&mut self, dt: f32, braking: bool) -> Option<Kind> {
-        self.accum += dt;
-        let mut done = None;
-        while self.accum >= REEL_TICK {
-            self.accum -= REEL_TICK;
-            match self.landed {
-                Some(held) => {
-                    if held >= REEL_HOLD {
-                        done = Some(self.kind());
-                    } else {
-                        self.landed = Some(held + 1);
-                    }
-                }
-                None => {
-                    self.pos += self.vel;
-                    self.vel *= if braking { REEL_BRAKE } else { REEL_DECAY };
-                    if self.vel < REEL_STOP {
-                        self.vel = 0.0;
-                        self.pos = self.pos.round();
-                        self.landed = Some(0);
-                    }
-                }
-            }
-        }
-        done
-    }
-
-    /// How lit the tube is: neon cycling while the strip flies, a white pop
-    /// on the landing, then the winner's own tone.
-    fn light(&self) -> Phosphor {
-        match self.landed {
-            // Blow out on impact and fall into the game's tone over the
-            // settle, so the rest of the hold is a steady beat on the winner
-            // rather than a fade the player waits out.
-            Some(held) => {
-                let t = 1.0 - (held as f32 / REEL_SETTLE.len() as f32);
-                self.kind().phosphor().flash(t.max(0.0))
-            }
-            None => {
-                // Cycling faster than the eye settles — the reel is the one
-                // screen with no game on it to protect.
-                let slot = self.pos * 0.8;
-                let index = slot as usize;
-                Phosphor::neon(index).mix(Phosphor::neon(index + 1), slot.fract())
-            }
-        }
-    }
-}
-
-// ----------------------------------------------------------------- machine
-
 /// The mode the machine is in, and the cut it is part-way through on its way
-/// to the next one. A `go` collapses the raster, swaps behind the dark, and
-/// warms back in; a `slide` swaps in place, for transitions that are a
-/// continuation of what is already on screen.
+/// to the next one. Every screen change goes through the tube: it collapses to
+/// a line, the mode swaps behind the dark, and it opens on the new one.
+///
+/// Not every change, though. The settle after a crash is continuous with the
+/// game that produced it, so [`Machine::slide`] exists for the transitions
+/// where a cut would throw away the thing worth watching.
 struct Machine {
     mode: Mode,
     pending: Option<Mode>,
@@ -250,25 +136,27 @@ impl Machine {
         Machine {
             mode,
             pending: None,
-            // The machine opens on its first frame, so the very first thing
-            // the player sees is a tube warming up.
+            // The machine opens on its first frame, so the very first thing the
+            // player sees is a tube warming up.
             curtain: 1.0,
         }
     }
 
+    /// Change screens behind a cut.
     fn go(&mut self, next: Mode) {
         if self.pending.is_none() {
             self.pending = Some(next);
         }
     }
 
+    /// Change screens without one, for a transition that is a continuation.
     fn slide(&mut self, next: Mode) {
         self.mode = next;
     }
 
-    /// Advance the cut. True while the picture is on its way out, which is
-    /// when the sim holds — on the way back in the new mode is already
-    /// running, so the tube warms up on a game that has started.
+    /// Advance the cut. True while the picture is on its way out, which is when
+    /// the sim holds — on the way back in the new mode is already running, so
+    /// the tube warms up on a game that has started.
     fn cut(&mut self, dt: f32) -> bool {
         if let Some(next) = self.pending.take() {
             self.curtain += dt / CUT_OUT;
@@ -288,51 +176,74 @@ impl Machine {
 }
 
 enum Mode {
-    /// The reel, turning toward whatever it lands on.
-    Spin(Reel),
+    Attract {
+        since: Instant,
+    },
+    /// A credit going in, before anything has been decided.
+    Coin {
+        age: f32,
+        next: Vec<Kind>,
+    },
+    /// The wheel, turning toward `reel`'s last slot and then holding on it.
+    Spin {
+        reel: Vec<Kind>,
+        age: f32,
+    },
     Play,
-    /// The score settle after a death.
+    /// The clock stopped, holding whatever was on screen.
+    Paused,
+    /// The controls. `playing` records whether a run is waiting behind them, so
+    /// backing out returns to the game rather than dropping into a stale one.
+    Help {
+        playing: bool,
+    },
+    /// The crash settle. `shown` climbs to the run's real score.
     Over {
         age: f32,
         score: u32,
-        best: u32,
-        new_best: bool,
+        rank: Option<usize>,
+    },
+    /// The board, with the run that just landed still highlighted.
+    Board {
+        age: f32,
+        rank: Option<usize>,
     },
 }
 
-// -------------------------------------------------------------------- loop
-
-pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
+pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Result<Exit> {
     let _guard = term::Guard::enter()?;
     let mut pad = term::Pad::open();
 
-    // Over SSH every frame is bytes on a wire, and on a phone it may be bytes
-    // on a cellular plan. Half the frames is most of the saving with none of
-    // the picture gone.
-    let fps: u64 = if term::remote() { 30 } else { 60 };
-    let frame_time = Duration::from_micros(1_000_000 / fps);
-
     let mut rng = Rng::new();
     let mut scores = Table::load();
-    let mut kind = ALL[rng.range(ALL.len() as u32) as usize];
-    let mut game = kind.spawn(Rng::new());
+    let mut kind = pick(&mut rng, None);
 
-    let mut canvas = Screen::new();
-    let mut monitor = Monitor::fit(w0, h0);
-    let mut prev = vec![UNPAINTED; w0 * h0];
-    let mut presenter = term::Presenter::new();
+    let mut stage = Stage::new(kind, kind.field(w0, h0), w0, h0);
+    stage.quality = quality;
+    let frame_time = Duration::from_micros(1_000_000 / quality.fps.clamp(10, 120) as u64);
+    let mut prev = vec![Default::default(); stage.w * stage.h];
+    let mut presenter = term::Presenter::new(stage.quality.tol);
+
+    let mut game = kind.spawn(Rng::new(), w0, h0);
+    // The attract screen shows a game playing itself, and it is never the one
+    // you are about to be given — the demo is a trailer, not a spoiler.
+    let mut demo_kind = pick(&mut rng, Some(kind));
+    let mut demo = demo_kind.spawn(Rng::new(), w0, h0);
+    let mut machine = Machine::new(Mode::Attract {
+        since: Instant::now(),
+    });
+    let mut played = Duration::ZERO;
+    let mut frame_no: u32 = 0;
+
     let mut term_size = (w0, h0);
-    let mut small_said = false;
-
-    let mut machine = Machine::new(Mode::Spin(Reel::new(&mut rng)));
     let mut accumulator = Duration::ZERO;
     let mut last = Instant::now();
-    // Render frames the whole machine is frozen for. An impact that stops
-    // time reads as an impact; one that does not reads as a colour change.
+    // Render frames the whole machine is frozen for. An impact that stops time
+    // reads as an impact; one that does not reads as a colour change.
     let mut freeze: u32 = 0;
-    let mut frame_no: u64 = 0;
-    // The tube blowout still decaying from the last loud thing.
-    let mut flash: f32 = 0.0;
+    // Frames of lost horizontal hold and of inverted picture still owed.
+    let mut sync_loss: u32 = 0;
+    let mut negative: u32 = 0;
 
     let exit = loop {
         let frame_start = Instant::now();
@@ -341,45 +252,51 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         let poll = pad.poll()?;
         if let Some((cw, ch)) = poll.resize {
             term_size = (cw, ch);
-            if Monitor::fits(cw, ch) {
-                monitor = Monitor::fit(cw, ch);
-                prev = vec![UNPAINTED; cw * ch];
-                small_said = false;
+            if cw >= term::MIN_SIZE.0 && ch >= term::MIN_SIZE.1 && (cw != stage.w || ch != stage.h)
+            {
+                stage = Stage::new(kind, game.field(), cw, ch);
+                stage.quality = quality;
+                prev = vec![Default::default(); stage.w * stage.h];
                 term::clear()?;
             }
         }
 
         if host.finished() {
-            // The command coming back must not quietly cost a good run: file
-            // it before the machine goes away.
-            if matches!(machine.mode, Mode::Play) {
+            // The command coming back must not quietly cost a good run: file it
+            // before the machine goes away.
+            if matches!(machine.mode, Mode::Play | Mode::Paused) {
                 scores.submit(kind, game.score());
             }
             break Exit::Finished;
         }
 
-        // A window that shrank under the picture cannot show it at all.
-        // Saying so beats painting garbage.
-        if !Monitor::fits(term_size.0, term_size.1) {
-            if !small_said {
-                term::say_too_small()?;
-                small_said = true;
-            }
+        // A frame that shrank under the minimum cannot be drawn at all. Saying
+        // so beats drawing the old size into a smaller window, which is what
+        // ignoring it used to do.
+        if stage.w > term_size.0 || stage.h > term_size.1 {
+            stage.too_small();
+            presenter.frame(&stage.cells, &prev, stage.w, stage.h)?;
+            prev.copy_from_slice(&stage.cells);
             std::thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
             continue;
         }
 
-        // Esc leaves the game for the reel, and leaves the reel for the
-        // shell — one key never drops the whole session by surprise, but two
-        // always do.
+        // Esc leaves the game for the attract screen, and leaves the attract
+        // screen for the shell — so one key never drops the whole session by
+        // surprise, but two always do.
         if poll.keys.quit {
             match machine.mode {
-                Mode::Spin(_) => break Exit::Quit,
-                Mode::Play => {
-                    scores.submit(kind, game.score());
-                    machine.go(Mode::Spin(Reel::new(&mut rng)));
+                Mode::Attract { .. } => break Exit::Quit,
+                // Backing out of the controls or a pause returns to the game,
+                // not out of it: one key must never cost a run.
+                Mode::Help { playing } => machine.slide(leave_help(playing)),
+                Mode::Paused => machine.slide(Mode::Play),
+                _ => {
+                    machine.go(Mode::Attract {
+                        since: Instant::now(),
+                    });
+                    played = Duration::ZERO;
                 }
-                Mode::Over { .. } => machine.go(Mode::Spin(Reel::new(&mut rng))),
             }
         }
 
@@ -389,6 +306,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
             pad.release_all();
         }
         let closing = machine.cut(STEP.as_secs_f32());
+        stage.curtain = machine.curtain;
+        // On the way back in the picture is still bending; on the way out it is
+        // already gone, so there is nothing to bend.
+        stage.warmup = if closing { 0.0 } else { machine.curtain };
 
         let now = Instant::now();
         accumulator += (now - last).min(MAX_CATCHUP);
@@ -402,121 +323,160 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
         }
         let mut steps = 0;
         while freeze == 0 && !closing && accumulator >= STEP && steps < MAX_STEPS {
+            // A held screen still runs its own step — that is how it notices the
+            // key that lets it go — but the game inside it does not advance.
             accumulator -= STEP;
-            // Only the first step of a frame sees the input: catch-up steps
-            // run neutral, so a hard drop never fires twice off one keypress.
-            let keys = if steps == 0 { poll.keys } else { Default::default() };
+            // Only the first step of a frame sees the input: catch-up steps run
+            // neutral, so a hard drop never fires twice off one keypress.
+            let keys = if steps == 0 { poll.keys } else { Keys::default() };
             steps += 1;
+            advance(Sim {
+                machine: &mut machine,
+                kind: &mut kind,
+                game: &mut game,
+                stage: &mut stage,
+                scores: &mut scores,
+                rng: &mut rng,
+                played: &mut played,
+                keys: &keys,
+                host,
+            });
+        }
 
-            match &mut machine.mode {
-                Mode::Spin(reel) => {
-                    // Any key slams the brake — the spin is a thrill, not a
-                    // wait.
-                    if let Some(landed) = reel.step(STEP.as_secs_f32(), keys.skip()) {
-                        kind = landed;
-                        game = kind.spawn(Rng::new());
-                        machine.go(Mode::Play);
-                    }
+        stage.progress = host.progress();
+        // A held screen is held all the way down: the game, the background and
+        // the monitor's own hum all stop, or a pause looks like a freeze.
+        let held = matches!(machine.mode, Mode::Paused | Mode::Help { .. });
+
+        // Whatever the game just did reaches the background and the screen
+        // here, and nowhere else: no game knows the warp field exists.
+        let punch = game.take_punch();
+        if punch > 0.0 {
+            stage.warp.punch(punch);
+            stage.flash = 0.35 * punch;
+            // Past a certain size a hit stops being something on the screen and
+            // starts being something that happened to the monitor.
+            if punch >= JOLT_FLOOR {
+                let over = (punch - JOLT_FLOOR) / (1.0 - JOLT_FLOOR);
+                stage.fringe = 6.0 * over;
+                let kick = 1 + (3.0 * over) as i32;
+                stage.jolt = (rng.range(2 * kick as u32 + 1) as i32 - kick, kick);
+                // The biggest hits take the horizontal hold with them. Held for
+                // a few frames rather than one, or it is over before the eye
+                // has decided anything happened.
+                if punch >= TEAR_FLOOR {
+                    sync_loss = SYNC_FRAMES;
                 }
-                Mode::Play => {
-                    let input = crate::games::Input {
-                        left: keys.left,
-                        right: keys.right,
-                        up: keys.up,
-                        down: keys.down,
-                        cw: keys.cw,
-                        ccw: keys.ccw,
-                        hard: keys.hard,
-                        hold: keys.hold,
-                        taps: keys.taps,
-                    };
-                    game.step(&input, STEP);
-                    freeze = freeze.max(game.take_hitstop());
-                    flash = flash.max(game.take_flash());
-                    if game.is_over() {
-                        let score = game.score();
-                        let best = scores.best(kind);
-                        let new_best = scores.submit(kind, score) == Some(0);
-                        // No cut: the death animation just finished on this
-                        // same picture, and the settle is a continuation of
-                        // it.
-                        machine.slide(Mode::Over {
-                            age: 0.0,
-                            score,
-                            best: best.max(score),
-                            new_best,
-                        });
-                        pad.release_all();
-                    }
-                }
-                Mode::Over { age, .. } => {
-                    *age += STEP.as_secs_f32();
-                    let skip = *age >= OVER_GRACE && keys.skip();
-                    if skip || *age >= OVER_HOLD {
-                        machine.go(Mode::Spin(Reel::new(&mut rng)));
-                    }
+                // And the very biggest flip the picture for two frames, which
+                // is what a cabinet did when it had nothing louder left.
+                if punch >= 0.95 {
+                    negative = 2;
                 }
             }
         }
+        // What the game says happened, in the loudest terms the screen has.
+        // The games never name a pattern; they name an event, and the mapping
+        // lives here so both of them react identically to the same kind of
+        // thing.
+        if let Some(kick) = game.take_kick() {
+            let (pattern, hue) = match kick {
+                Kick::Small => (strobe::CLEAR, hex(WHITE)),
+                Kick::Big => (strobe::BIG, hex(WHITE)),
+                Kick::Huge => (strobe::HUGE, hex(WHITE)),
+                Kick::Bonus => (strobe::BONUS, hex(YELLOW)),
+                Kick::Death => (strobe::DEATH, hex(WHITE)),
+            };
+            stage.fire(pattern, hue);
+        }
+        freeze = freeze.max(game.take_hitstop());
+        // The background stops with everything else — a field still flying
+        // through a frozen frame reads as a dropped frame, not as an impact.
+        if freeze == 0 && !held {
+            stage.animate(STEP.as_secs_f32() * steps.max(1) as f32, game.heat());
+        }
 
-        flash = (flash - STEP.as_secs_f32() / FLASH_DECAY).max(0.0);
+        if sync_loss > 0 {
+            // Decaying rather than flat: the hold comes back rather than
+            // being switched back on.
+            stage.tear = 9.0 * sync_loss as f32 / SYNC_FRAMES as f32;
+            sync_loss -= 1;
+        }
+        if negative > 0 {
+            stage.invert = 1.0;
+            negative -= 1;
+        }
 
-        // Draw the mode onto the canvas and pick the tube's tone.
-        canvas.clear();
-        let ph = match &machine.mode {
-            Mode::Spin(reel) => {
-                draw_reel(&mut canvas, reel, scores.best(reel.kind()));
-                reel.light()
+        let right = clock(played);
+        let tick = Tick {
+            left: host.status(),
+            right,
+        };
+
+        // The demo plays itself only while it is on screen, and a demo that
+        // tops out is replaced with a different game rather than restarted —
+        // the marquee should never show the same run twice.
+        if matches!(machine.mode, Mode::Attract { .. }) {
+            if demo.is_over() {
+                demo_kind = pick(&mut rng, Some(demo_kind));
+                demo = demo_kind.spawn(Rng::new(), stage.w, stage.h);
             }
-            Mode::Play => {
-                game.draw(&mut canvas);
-                // The game's own tone, pushed towards gold as the run heats
-                // up, blown towards white by whatever just happened.
-                kind.phosphor()
-                    .mix(Phosphor::GOLD, game.heat() * 0.85)
-                    .flash(flash)
-            }
-            Mode::Over {
-                age,
-                score,
-                best,
-                new_best,
-            } => {
-                draw_over(&mut canvas, *score, *best, *new_best, *age);
-                // A record blows the panel out gold; an ordinary death flares
-                // red and settles back into the game's own tone.
-                let base = if *new_best {
-                    Phosphor::GOLD
-                } else {
-                    Phosphor::ALARM
+            let input = demo.autopilot();
+            demo.step(&input, STEP);
+        }
+
+        match &machine.mode {
+            Mode::Attract { since } => {
+                // The attract ticker teaches instead of reporting: it is the one
+                // screen where the player is not yet busy, and the only place
+                // the controls can be read without covering the command's own
+                // output later.
+                let teach = Tick {
+                    left: demo_kind.hint().to_string(),
+                    right: tick.right.clone(),
                 };
-                let settle = (age / OVER_GRACE).min(1.0);
-                base.mix(kind.phosphor(), settle * 0.6)
+                let idle = since.elapsed().as_secs_f32();
+                let t = frame_no as f32 * STEP.as_secs_f32();
+                if ((idle / ATTRACT_CYCLE) as u32).is_multiple_of(2) {
+                    stage.attract(demo.as_ref(), scores.best(demo_kind), t, &teach);
+                } else {
+                    // The board the demo is playing for, so the two halves of
+                    // the loop are about the same game.
+                    let rows = scores.top(demo_kind);
+                    stage.board(demo_kind, &rows, None, idle, &teach);
+                }
             }
-        };
-
-        // The wrap rule: the command's progress as a hairline across the very
-        // top, on every screen, because it is the one thing the player is
-        // actually waiting for.
-        if let Some(p) = host.progress() {
-            canvas.hline(0, 0, (screen::W as f32 * p.clamp(0.0, 1.0)) as u32);
+            Mode::Coin { age, .. } => {
+                stage.coin(demo.as_ref(), *age, &tick)
+            }
+            Mode::Spin { reel, age } => {
+                let t = (age / SPIN_TIME.as_secs_f32()).clamp(0.0, 1.0);
+                // Ease out to the fifth: nearly all the travel is spent in the
+                // first third and the last few slots crawl past, which is the
+                // whole difference between a wheel and a fade.
+                let travel = 1.0 - (1.0 - t).powi(5);
+                stage.slam = (stage.slam - 0.12).max(0.0);
+                stage.spin(reel, travel, &tick);
+            }
+            Mode::Play => stage.game(game.as_ref(), &tick),
+            Mode::Paused => stage.paused(game.as_ref(), &tick),
+            Mode::Help { .. } => stage.help(kind, &tick),
+            Mode::Over { age, score, rank } => {
+                let settle = Settle {
+                    fade: (age / SINK_TIME).clamp(0.0, 1.0),
+                    shown: counted(*score, *age),
+                    record: *rank == Some(0),
+                    tally: game.tally(),
+                };
+                stage.over(game.as_ref(), &settle, &tick);
+            }
+            Mode::Board { age, rank } => {
+                let rows = scores.top(kind);
+                stage.board(kind, &rows, *rank, *age, &tick);
+            }
         }
 
-        // Hitstop and shake are the same event seen twice: the world stops,
-        // and the picture recoils in its housing.
-        let fx = Fx {
-            shake: if freeze > 0 {
-                let swing = if frame_no.is_multiple_of(2) { 1.0 } else { -1.0 };
-                swing * (freeze as f32 / 6.0).min(1.0)
-            } else {
-                0.0
-            },
-            cut: machine.curtain,
-        };
-        let (cols, rows) = (monitor.cols, monitor.rows);
-        let cells = monitor.compose(&canvas, ph, fx, true);
-        presenter.frame(cells, &prev, cols, rows)?;
-        prev.copy_from_slice(cells);
+        presenter.frame(&stage.cells, &prev, stage.w, stage.h)?;
+        prev.copy_from_slice(&stage.cells);
 
         std::thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
     };
@@ -525,151 +485,203 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
     Ok(exit)
 }
 
-// ------------------------------------------------------------------ screens
+/// Everything one sim step is allowed to touch. Bundled because the loop body
+/// would otherwise take nine arguments and drift out of sync with itself.
+struct Sim<'a> {
+    machine: &'a mut Machine,
+    kind: &'a mut Kind,
+    game: &'a mut Box<dyn Game>,
+    stage: &'a mut Stage,
+    scores: &'a mut Table,
+    rng: &'a mut Rng,
+    played: &'a mut Duration,
+    keys: &'a Keys,
+    host: &'a mut dyn Host,
+}
 
-/// The window the strip turns behind, outer edges. Everything else on the
-/// screen is measured off it: air above and below, one line of type centred
-/// in each.
-const WIN_X: i32 = 4;
-const WIN_Y: i32 = 11;
-const WIN_W: u32 = 72;
-const WIN_H: u32 = 26;
-
-/// Top row of a name sitting exactly on the payline — centred between the
-/// window's inner faces.
-const PAYLINE: f32 = 18.5;
-
-/// Top row of the marks that pinch in on the payline from either post.
-const MARK_Y: i32 = 21;
-
-/// How much of the strip survives at the window's lip, in pixels out of four,
-/// one entry per row inward. A name does not vanish at the edge, it rolls out
-/// of sight.
-const LIP: [u32; 3] = [1, 2, 3];
-
-/// The reel: names on a strip turning behind a lit window, the one held
-/// between the marks being what you are about to play.
-pub fn draw_reel(s: &mut Screen, reel: &Reel, best: u32) {
-    let inner_x = WIN_X + 1;
-    let inner_w = WIN_W - 2;
-    let inner_top = WIN_Y + 1;
-    let inner_bottom = WIN_Y + WIN_H as i32 - 2;
-    let inner_h = (inner_bottom - inner_top + 1) as u32;
-
-    // Lay the strip down first — one name per slot, all the same size, so it
-    // reads as a continuous band rather than a list. The range covers every
-    // slot that can have so much as one row inside the window at any point in
-    // the turn.
-    let pos = reel.strip();
-    let base = pos.floor();
-    let frac = pos - base;
-    for offset in -1..=2i64 {
-        let slot = base as i64 + offset;
-        let name = ALL[slot.rem_euclid(ALL.len() as i64) as usize].name();
-        let y = PAYLINE + (offset as f32 - frac) * SLOT_H;
-        let w = screen::text_width(name) * 2;
-        s.text_scaled((screen::W as i32 - w) / 2, y.round() as i32, name, 2);
-    }
-
-    // Then cut the strip back to the window, so names are sliced off
-    // mid-letter as they enter and leave — that slicing is what sells the
-    // spin.
-    s.fill_rect(0, 0, screen::W as u32, inner_top as u32, false);
-    s.fill_rect(
-        0,
-        inner_bottom + 1,
-        screen::W as u32,
-        (screen::H as i32 - inner_bottom - 1) as u32,
-        false,
-    );
-    s.fill_rect(0, inner_top, inner_x as u32, inner_h, false);
-    s.fill_rect(
-        inner_x + inner_w as i32,
-        inner_top,
-        screen::W as u32 - (inner_x as u32 + inner_w),
-        inner_h,
-        false,
-    );
-
-    // A one-bit panel has no greys, so the curve of the drum is spent in the
-    // only currency there is: pixels knocked out of the strip.
-    for (row, keep) in LIP.iter().enumerate() {
-        shade_row(s, inner_x, inner_top + row as i32, inner_w, *keep);
-        shade_row(s, inner_x, inner_bottom - row as i32, inner_w, *keep);
-    }
-
-    s.rect(WIN_X, WIN_Y, WIN_W, WIN_H);
-    // The payline is marked by the window pinching in on the name rather than
-    // by rules laid across the picture: less ink, and it puts the eye on the
-    // name instead of on the furniture.
-    let mark = ["#..", "##.", "###", "##.", "#.."];
-    s.sprite(WIN_X, MARK_Y, &mark);
-    for (dy, row) in mark.iter().enumerate() {
-        for (dx, ch) in row.chars().enumerate() {
-            if ch == '#' {
-                let x = WIN_X + WIN_W as i32 - 1 - dx as i32;
-                s.set(x, MARK_Y + dy as i32, true);
+fn advance(s: Sim) {
+    let dts = STEP.as_secs_f32();
+    match &mut s.machine.mode {
+        Mode::Attract { since } => {
+            if s.keys.help {
+                s.machine.slide(Mode::Help { playing: false });
+                return;
+            }
+            let start = s.keys.skip();
+            let auto = s.host.autostart() && since.elapsed() >= AUTOSTART;
+            if start || auto {
+                // The coin goes in behind a cut of its own, and the wheel it
+                // will turn is decided now so the credit screen is already
+                // holding the answer it has not shown yet.
+                let Mode::Spin { reel, .. } = spin_to(pick(s.rng, None), s.rng) else {
+                    return;
+                };
+                s.stage.fire(strobe::COIN, hex(YELLOW));
+                s.machine.slide(Mode::Coin {
+                    age: 0.0,
+                    next: reel,
+                });
+            }
+        }
+        Mode::Coin { age, next } => {
+            *age += dts;
+            if *age >= COIN_TIME {
+                let reel = std::mem::take(next);
+                s.machine.go(Mode::Spin { reel, age: 0.0 });
+            }
+        }
+        Mode::Spin { reel, age } => {
+            *age += dts;
+            // The wheel stops, and then the name it stopped on is held. Cutting
+            // on the frame it lands throws away the only moment the answer is
+            // actually on screen.
+            let travel = SPIN_TIME.as_secs_f32();
+            if *age >= travel && *age - dts < travel {
+                let landed = *reel.last().unwrap_or(&Kind::Tetris);
+                s.stage.fire(strobe::LAND, landed.hue());
+                s.stage.slam = 1.0;
+            }
+            if *age >= travel + SPIN_HOLD {
+                let landed = *reel.last().unwrap_or(&Kind::Tetris);
+                *s.kind = landed;
+                s.stage.retarget(landed, s.game.field());
+                *s.game = landed.spawn(Rng::new(), s.stage.w, s.stage.h);
+                *s.played = Duration::ZERO;
+                s.machine.go(Mode::Play);
+            }
+        }
+        Mode::Paused => {
+            if s.keys.pause || s.keys.enter {
+                s.machine.slide(Mode::Play);
+            } else if s.keys.help {
+                s.machine.slide(Mode::Help { playing: true });
+            }
+        }
+        Mode::Help { playing } => {
+            if s.keys.skip() || s.keys.help {
+                let playing = *playing;
+                s.machine.slide(leave_help(playing));
+            }
+        }
+        Mode::Play => {
+            if s.keys.pause {
+                s.machine.slide(Mode::Paused);
+                return;
+            }
+            if s.keys.help {
+                s.machine.slide(Mode::Help { playing: true });
+                return;
+            }
+            *s.played += STEP;
+            s.game.step(&input(s.keys), STEP);
+            if s.game.is_over() {
+                let score = s.game.score();
+                let rank = s.scores.submit(*s.kind, score);
+                // No cut: the crash, the dissolve and the settle are one
+                // continuous thing, and cutting away from it would throw out
+                // the part worth watching.
+                if rank == Some(0) {
+                    s.stage.fire(strobe::RECORD, hex(YELLOW));
+                }
+                s.machine.slide(Mode::Over {
+                    age: 0.0,
+                    score,
+                    rank,
+                });
+            }
+        }
+        Mode::Over { age, rank, .. } => {
+            // A dead game is still stepped, so a death animation of its own
+            // keeps running on the same clock as the settle around it.
+            s.game.step(&Input::default(), STEP);
+            *age += dts;
+            let hold = if *rank == Some(0) {
+                OVER_TIME_RECORD
+            } else {
+                OVER_TIME
+            };
+            // Any key skips ahead: nobody should have to sit through the
+            // ceremony twice.
+            if *age >= hold || s.keys.skip() {
+                let rank = *rank;
+                s.machine.go(Mode::Board { age: 0.0, rank });
+            }
+        }
+        Mode::Board { age, .. } => {
+            *age += dts;
+            if *age >= BOARD_TIME || s.keys.skip() {
+                let next = pick(s.rng, Some(*s.kind));
+                s.machine.go(spin_to(next, s.rng));
             }
         }
     }
-    if reel.paying() {
-        s.invert_rect(inner_x, inner_top, inner_w, inner_h);
-    }
-
-    // Two lines of type, both centred, both always in the same place: what
-    // the machine is offering, and what it wants from you. The best score
-    // waits for the landing — under a turning strip the number would only
-    // flicker between games.
-    if reel.has_landed() {
-        if best > 0 {
-            let label = format!("BEST {best}");
-            s.text((screen::W as i32 - screen::text_width(&label)) / 2, 3, &label);
-        }
-        let hint = reel.kind().hint();
-        s.text((screen::W as i32 - screen::text_width(hint)) / 2, 40, hint);
-    } else {
-        let hint = "ANY KEY STOPS IT";
-        s.text((screen::W as i32 - screen::text_width(hint)) / 2, 40, hint);
-    }
 }
 
-/// Knock pixels out of one row of the strip: `keep` of every four survive, on
-/// a diagonal so the holes never line up into stripes.
-fn shade_row(s: &mut Screen, x: i32, y: i32, w: u32, keep: u32) {
-    for dx in 0..w as i32 {
-        let x = x + dx;
-        let cut = match keep {
-            1 => (x + y).rem_euclid(4) != 0,
-            2 => (x + y).rem_euclid(2) != 0,
-            _ => (x + y).rem_euclid(4) == 2,
-        };
-        if cut {
-            s.set(x, y, false);
+/// Where backing out of the controls goes. Straight back into the run if there
+/// is one, and to the attract screen if the player was only reading.
+fn leave_help(playing: bool) -> Mode {
+    if playing {
+        Mode::Play
+    } else {
+        Mode::Attract {
+            since: Instant::now(),
         }
     }
 }
 
-/// The score settle: what the run was worth, against what the game has ever
-/// paid, over a bar draining towards the next spin — so the wait reads as the
-/// machine reloading rather than as the game having stopped.
-pub fn draw_over(s: &mut Screen, score: u32, best: u32, new_best: bool, age: f32) {
-    let title = "GAME OVER";
-    let w = screen::text_width(title) * 2;
-    s.text_scaled((screen::W as i32 - w) / 2, 6, title, 2);
-    let line = format!("SCORE {score}");
-    s.text((screen::W as i32 - screen::text_width(&line)) / 2, 24, &line);
-    let sub = if new_best {
-        "NEW BEST!".to_string()
+/// A game at random, never the one just played — the whole promise is that the
+/// machine gives you something else.
+fn pick(rng: &mut Rng, avoid: Option<Kind>) -> Kind {
+    let choices: Vec<Kind> = ALL.iter().copied().filter(|k| Some(*k) != avoid).collect();
+    // With one game installed the filter empties and the only honest answer is
+    // to play it again.
+    let choices = if choices.is_empty() {
+        ALL.to_vec()
     } else {
-        format!("BEST {best}")
+        choices
     };
-    // A record announces itself on a blink; a plain best just reads.
-    if !new_best || ((age / 0.25) as u32).is_multiple_of(2) {
-        s.text((screen::W as i32 - screen::text_width(&sub)) / 2, 32, &sub);
+    choices[rng.range(choices.len() as u32) as usize]
+}
+
+/// Build a reel that runs through the installed games and stops on `target`.
+/// The wheel is padded so it turns for a while even with two games on it.
+fn spin_to(target: Kind, rng: &mut Rng) -> Mode {
+    let mut reel: Vec<Kind> = (0..SPIN_SLOTS)
+        .map(|_| ALL[rng.range(ALL.len() as u32) as usize])
+        .collect();
+    // The last slot is the answer; everything before it is only motion.
+    if let Some(slot) = reel.last_mut() {
+        *slot = target;
     }
-    let left = (OVER_HOLD - age).max(0.0) / OVER_HOLD;
-    let w = (screen::W as f32 * left) as u32;
-    s.fill_rect(0, screen::H as i32 - 3, w, 3, true);
+    // A reel that shows the answer in the slot before it lands gives the result
+    // away a beat early.
+    let n = reel.len();
+    if n >= 2 && reel[n - 2] == target && ALL.len() > 1 {
+        reel[n - 2] = *ALL.iter().find(|k| **k != target).unwrap_or(&target);
+    }
+    Mode::Spin { reel, age: 0.0 }
+}
+
+/// The score counter's current reading: eased so it slams most of the way up
+/// immediately and then crawls the last of it.
+fn counted(score: u32, age: f32) -> u32 {
+    let t = (age / COUNT_TIME).clamp(0.0, 1.0);
+    let eased = 1.0 - (1.0 - t).powi(3);
+    (score as f32 * eased).round() as u32
+}
+
+fn input(k: &Keys) -> Input {
+    Input {
+        left: k.left,
+        right: k.right,
+        up: k.up,
+        down: k.down,
+        cw: k.cw,
+        ccw: k.ccw,
+        hard: k.hard,
+        hold: k.hold,
+        taps: k.taps,
+    }
 }
 
 #[cfg(test)]
@@ -677,174 +689,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_reel_spins_down_and_lands_on_a_real_game() {
-        let mut rng = Rng::from_seed(3);
-        let mut reel = Reel::new(&mut rng);
-        let mut secs = 0.0;
-        let winner = loop {
-            if let Some(kind) = reel.step(0.016, false) {
-                break kind;
-            }
-            secs += 0.016;
-            assert!(secs < 10.0, "the reel never stopped");
-        };
-        assert!(ALL.contains(&winner));
-        // Throw, settle and hold together: over inside about two seconds, and
-        // long enough to read as a gamble at all.
-        assert!((0.8..=2.2).contains(&secs), "the spin took {secs}s");
-    }
-
-    #[test]
-    fn braking_lands_the_reel_sooner() {
-        let mut rng = Rng::from_seed(4);
-        let mut free = Reel::new(&mut rng);
-        let mut braked = Reel::new(&mut rng);
-        let mut free_t = 0.0;
-        while free.step(0.016, false).is_none() {
-            free_t += 0.016;
-        }
-        let mut braked_t = 0.0;
-        while braked.step(0.016, true).is_none() {
-            braked_t += 0.016;
-        }
-        assert!(braked_t < free_t, "brake {braked_t} vs free {free_t}");
-    }
-
-    #[test]
-    fn the_reel_strobes_while_spinning_then_takes_the_winners_tone() {
-        let mut rng = Rng::from_seed(5);
-        let mut reel = Reel::new(&mut rng);
-        let first = reel.light();
-        reel.step(REEL_TICK, false);
-        assert_ne!(first, reel.light(), "the lamp should be moving");
-        while reel.step(REEL_TICK, false).is_none() {}
-        assert_eq!(reel.light(), reel.kind().phosphor());
-    }
-
-    #[test]
-    fn the_reel_overshoots_its_detent_and_rocks_back() {
-        let mut rng = Rng::from_seed(6);
-        let mut reel = Reel::new(&mut rng);
-        while reel.landed.is_none() {
-            reel.step(REEL_TICK, false);
-        }
-        let home = reel.pos;
-        // Past the detent first, then back through it, then still — and
-        // whatever the settle is doing, the winner never changes.
-        assert!(reel.strip() > home);
-        reel.step(REEL_TICK * 2.0, false);
-        assert!(reel.strip() < home);
-        for _ in 0..REEL_SETTLE.len() {
-            reel.step(REEL_TICK, false);
-        }
-        assert_eq!(reel.strip(), home);
-        assert_eq!(reel.index(), (home.round() as usize) % ALL.len());
-    }
-
-    #[test]
-    fn the_strip_moves_between_ticks() {
-        let mut rng = Rng::from_seed(7);
-        let mut reel = Reel::new(&mut rng);
-        reel.step(REEL_TICK, false);
-        let a = reel.strip();
-        reel.step(REEL_TICK * 0.5, false);
-        assert!(reel.strip() > a, "the picture interpolates between ticks");
-    }
-
-    #[test]
-    fn a_landed_reel_frames_the_winner_on_the_payline() {
-        let reel = Reel::parked(Kind::Snake);
-        let mut s = Screen::new();
-        draw_reel(&mut s, &reel, 0);
-
-        // The window: unbroken rules top and bottom, posts either side.
-        for x in WIN_X..WIN_X + WIN_W as i32 {
-            assert!(s.get(x, WIN_Y), "window top broken at {x}");
-            assert!(s.get(x, WIN_Y + WIN_H as i32 - 1), "window bottom broken at {x}");
-        }
-        // The name under the marks is drawn whole where the payline says —
-        // the lip shading must not have eaten it.
-        let name = Kind::Snake.name();
-        let w = screen::text_width(name) * 2;
-        let x = (screen::W as i32 - w) / 2;
-        let mut want = Screen::new();
-        want.text_scaled(x, PAYLINE.round() as i32, name, 2);
-        for y in 0..screen::H as i32 {
-            for px in 0..screen::W as i32 {
-                assert!(
-                    !want.get(px, y) || s.get(px, y),
-                    "{name} missing a pixel at {px},{y}"
-                );
-            }
-        }
-        // And it sits clear of the marks, inside the glass.
-        assert!(x > WIN_X + 3 && x + w < WIN_X + WIN_W as i32 - 3);
-    }
-
-    #[test]
-    fn a_turning_reel_stays_inside_the_window() {
-        let mut rng = Rng::from_seed(8);
-        let mut reel = Reel::new(&mut rng);
-        // Every frame of a whole spin, including the settle: the strip may
-        // never paint over the type or the air around the window.
-        loop {
-            let done = reel.step(0.016, false).is_some();
-            let mut s = Screen::new();
-            draw_reel(&mut s, &reel, 42);
-            for y in 0..WIN_Y {
-                for x in 0..screen::W as i32 {
-                    // Row 3 carries the BEST readout once landed.
-                    if (3..9).contains(&y) {
-                        continue;
-                    }
-                    assert!(!s.get(x, y), "strip leaked above the window at {x},{y}");
-                }
-            }
-            for y in WIN_Y + WIN_H as i32..40 {
-                for x in 0..screen::W as i32 {
-                    assert!(!s.get(x, y), "strip leaked below the window at {x},{y}");
-                }
-            }
-            if done {
-                break;
-            }
-        }
-    }
-
-    #[test]
-    fn the_best_score_waits_for_the_landing() {
-        let mut rng = Rng::from_seed(9);
-        let mut reel = Reel::new(&mut rng);
-        let readout = |reel: &Reel| {
-            let mut s = Screen::new();
-            draw_reel(&mut s, reel, 42);
-            (0..screen::W as i32).any(|x| s.get(x, 3))
-        };
-        assert!(!readout(&reel), "a turning strip has no score to report");
-        while reel.step(0.016, false).is_none() {}
-        assert!(readout(&reel));
-    }
-
-    #[test]
     fn a_cut_holds_the_sim_until_the_picture_is_gone() {
         let mut m = Machine::new(Mode::Play);
         m.curtain = 0.0;
-        m.go(Mode::Over {
+        m.go(Mode::Board {
             age: 0.0,
-            score: 0,
-            best: 0,
-            new_best: false,
+            rank: None,
         });
         let mut frames = 0;
+        // Closing: the sim is held and the mode has not changed yet.
         while m.cut(0.016) {
             frames += 1;
             assert!(frames < 200, "the cut never finished");
-            if matches!(m.mode, Mode::Over { .. }) {
+            if matches!(m.mode, Mode::Board { .. }) {
                 break;
             }
             assert!(matches!(m.mode, Mode::Play), "the swap happened too early");
         }
-        assert!(matches!(m.mode, Mode::Over { .. }), "and then it swapped");
+        assert!(matches!(m.mode, Mode::Board { .. }), "and then it swapped");
         assert_eq!(m.curtain, 1.0, "behind a dark screen");
     }
 
@@ -863,18 +725,96 @@ mod tests {
     }
 
     #[test]
-    fn the_game_over_screen_reports_and_reloads() {
-        let mut s = Screen::new();
-        draw_over(&mut s, 1234, 2000, false, 0.0);
-        // A full countdown bar at age zero, drained near the hold.
-        let lit = |s: &Screen| {
-            (0..screen::W as i32)
-                .filter(|&x| s.get(x, screen::H as i32 - 2))
-                .count()
+    fn a_slide_changes_screens_without_a_cut() {
+        let mut m = Machine::new(Mode::Play);
+        m.curtain = 0.0;
+        m.slide(Mode::Board {
+            age: 0.0,
+            rank: None,
+        });
+        assert!(matches!(m.mode, Mode::Board { .. }));
+        assert_eq!(m.curtain, 0.0, "the picture never left");
+    }
+
+    #[test]
+    fn a_second_request_mid_cut_does_not_jump_the_queue() {
+        let mut m = Machine::new(Mode::Play);
+        m.curtain = 0.0;
+        m.go(Mode::Board {
+            age: 0.0,
+            rank: None,
+        });
+        m.go(Mode::Attract {
+            since: Instant::now(),
+        });
+        while m.cut(0.016) && !matches!(m.mode, Mode::Board { .. }) {}
+        assert!(matches!(m.mode, Mode::Board { .. }), "the first one won");
+    }
+
+    #[test]
+    fn a_coin_holds_the_wheel_it_has_already_decided() {
+        // The reel is picked when the credit goes in, so the credit screen is
+        // already holding an answer it has not shown yet. Losing it there would
+        // mean re-rolling after the ceremony, which is a different game.
+        let mut rng = Rng::from_seed(21);
+        let Mode::Spin { reel, .. } = spin_to(Kind::Snake, &mut rng) else {
+            panic!("spin_to built the wrong mode");
         };
-        assert_eq!(lit(&s), screen::W, "the bar opens full");
-        let mut late = Screen::new();
-        draw_over(&mut late, 1234, 2000, false, OVER_HOLD * 0.95);
-        assert!(lit(&late) < screen::W / 10, "and drains as the reel nears");
+        let coin = Mode::Coin {
+            age: 0.0,
+            next: reel.clone(),
+        };
+        let Mode::Coin { next, .. } = coin else {
+            unreachable!()
+        };
+        assert_eq!(next, reel);
+        assert_eq!(next.last(), Some(&Kind::Snake));
+    }
+
+    #[test]
+    fn the_ceremony_is_long_enough_to_be_one_and_short_enough_to_forgive() {
+        // Everything between pressing a key and playing is dead time, and this
+        // is the one stretch of it worth having. Two and a half seconds is a
+        // cabinet accepting a coin; five is a loading screen.
+        let total = COIN_TIME + SPIN_TIME.as_secs_f32() + SPIN_HOLD;
+        assert!(total > 1.8, "too quick to read as a ceremony: {total}");
+        assert!(total < 2.8, "too long to sit through twice: {total}");
+    }
+
+    #[test]
+    fn the_wheel_crawls_before_it_stops() {
+        // Ease-out to the fifth. What matters is that the last slots pass
+        // slowly enough to be read, or the wheel is a fade with extra steps.
+        let travel = |t: f32| 1.0 - (1.0 - t).powi(5);
+        let early = travel(0.2) - travel(0.1);
+        let late = travel(1.0) - travel(0.9);
+        assert!(early > late * 8.0, "the wheel does not slow: {early} vs {late}");
+    }
+
+    #[test]
+    fn the_wheel_never_stops_where_it_just_was() {
+        let mut rng = Rng::from_seed(11);
+        for _ in 0..200 {
+            assert_ne!(pick(&mut rng, Some(Kind::Snake)), Kind::Snake);
+        }
+    }
+
+    #[test]
+    fn the_reel_ends_on_its_target_without_spoiling_it() {
+        let mut rng = Rng::from_seed(12);
+        for _ in 0..50 {
+            let Mode::Spin { reel, .. } = spin_to(Kind::Snake, &mut rng) else {
+                panic!("spin_to built the wrong mode");
+            };
+            assert_eq!(reel.last(), Some(&Kind::Snake));
+            assert_ne!(reel[reel.len() - 2], Kind::Snake);
+        }
+    }
+
+    #[test]
+    fn the_counter_lands_exactly_on_the_score() {
+        assert_eq!(counted(1234, 0.0), 0);
+        assert_eq!(counted(1234, COUNT_TIME), 1234);
+        assert_eq!(counted(1234, 99.0), 1234);
     }
 }
