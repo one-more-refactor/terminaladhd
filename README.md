@@ -59,10 +59,11 @@ minos are bordered bricks with knocked corners, and the chrome wordmark is
 silkscreened in flat bands. Nothing on this screen fades smoothly, because
 nothing on a 1983 screen could.
 
-Behind the arena a warp field flies outward from a vanishing point, and it is a
-readout rather than decoration: at rest it drifts, under heat it stretches, and
-on a line clear, an apple or a death it punches into hyperspace for a fifth of a
-second and falls back. Play well and the whole screen goes faster.
+The games play on clean black — nothing moves behind a field you are trying
+to read. The spectacle lives on the screens with nothing to protect: a lamp
+chase stepping around the marquee, a warp field flying behind the reel — a
+real slot reel now, names on a strip behind a lit window with detent marks,
+overshooting its stop and rocking back when it lands.
 
 The chrome is one row: the live score at the left, whatever the game has to
 shout — TETRIS, GOLDEN, a streak — beside it, the wrapped command's last line,

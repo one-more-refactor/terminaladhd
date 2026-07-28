@@ -118,7 +118,29 @@ fn apple(b: &mut Buf, l: &Layout, g: &Snake, shake: i32, t: f32) {
         None => (c(GREEN), 0.75 + 0.25 * (t * 4.0).sin()),
     };
 
-    pill(b, x, y, p, hue.mul(0.85 + 0.15 * pulse), 1.0 * pulse);
+    // The classic diamond, in the flat three-tone the bricks speak: face,
+    // light top edge, dark bottom, corners knocked off. The pulse rides the
+    // face brightness so the shape never changes — a morsel that breathes is
+    // alive, one that morphs is a glitch.
+    let face = hue.mul(0.72 + 0.28 * pulse);
+    let light = hue.lerp(c(WHITE), 0.5);
+    let dark = hue.mul(0.40);
+    for dy in 0..p {
+        for dx in 0..p {
+            let corner = (dx == 0 || dx == p - 1) && (dy == 0 || dy == p - 1);
+            if corner {
+                continue;
+            }
+            let col = if dy == 0 {
+                light
+            } else if dy == p - 1 || dx == p - 1 {
+                dark
+            } else {
+                face
+            };
+            put_base(b, x + dx, y + dy, col);
+        }
+    }
     if a.gold {
         burst(b, cx, cy, p as f32 * 2.2, 0.35 + 0.4 * pulse, hue.mul(0.8));
     }

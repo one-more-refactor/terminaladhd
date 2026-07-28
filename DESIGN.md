@@ -44,7 +44,7 @@ What is on screen now:
 | layer | what it is | why it earns its place |
 |---|---|---|
 | ground | flat near-black | the black a monitor is at rest |
-| warp field | streaks flying outward from behind the arena | a readout of how well you are doing |
+| warp field | streaks flying outward, on the idle screens only | spectacle where there is no game to read; play runs on clean black |
 | arena | the game | the game |
 | frame | a hard rail round the arena | says where the field ends, and nothing else |
 | columns | HOLD, NEXT, the readings | the numbers you are chasing |
@@ -354,9 +354,13 @@ It is three beats now, about a second and two thirds end to end:
    behind a ring going out from the middle. Nothing has been shown yet — but
    the wheel is already decided, so the screen is holding an answer it has not
    given. Re-rolling after the ceremony would be a different game.
-2. **The wheel**, 0.95 s, eased out to the fifth power. What matters is not the
-   duration but that the last few slots crawl past slowly enough to read. A
-   wheel that decelerates evenly is a fade with extra steps.
+2. **The reel**, 0.8 s, eased out to the fifth power: names on a vertical
+   strip turning behind a lit window, sliced mid-letter at the lips, detent
+   marks pinching the payline. On landing the strip overshoots its detent and
+   rocks back — a thing stopped by a pawl was visibly moving under its own
+   weight — and the glass fires inverse for the first beats of the slam. What
+   matters is not the duration but that the last slots crawl past slowly
+   enough to read; a reel that decelerates evenly is a fade with extra steps.
 3. **The hold.** The winner sits for 0.3 s before the cut, and for the first
    frames of it the name is drawn a second time a step off itself. Two frames of
    double image is what a thing arriving hard looks like when the face cannot

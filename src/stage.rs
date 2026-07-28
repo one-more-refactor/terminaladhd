@@ -17,7 +17,7 @@ use crate::games::{Game, Kind};
 use crate::scores::Entry;
 use crate::world::cabinet::{ground, pop, rule, strip, Strip};
 use crate::world::crt;
-use crate::world::draw::{lit, ring, text, text_center, text_w};
+use crate::world::draw::{lit, put_base, ring, text, text_center, text_w};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
 use crate::world::Warp;
@@ -414,6 +414,11 @@ impl Stage {
     /// never idle — it demoed, and the demo is what got the coin out of you.
     pub fn attract(&mut self, demo: &dyn Game, best: u32, t: f32, tick: &Tick) {
         self.open(demo.heat() * 0.5);
+        // The marquee's lamp chase: discrete bulbs around the frame edge,
+        // on or off, stepping — never fading. It is the one thing every
+        // machine in the room did, and it is what "on" looks like from
+        // across that room.
+        self.lamps(t);
         // The demo gets its own arena — it may not be the game the stage is cut
         // for — and no side columns: a NEXT queue nobody can use is clutter
         // around the marquee.
@@ -527,46 +532,118 @@ impl Stage {
         self.warp.punch(0.5 * (1.0 - travel));
         self.open(1.0);
 
+        // A slot machine's reel, not a fly-past: names on a vertical strip
+        // turning behind a lit window, sliced mid-letter at the lips, with
+        // detent marks pinching the payline. The strip overshoots its detent
+        // on landing and rocks back — a thing stopped by a pawl was visibly
+        // moving under its own weight.
         let l_w = self.layout.w as f32;
-        let mid = self.layout.h as f32;
-        let pitch = l_w * 0.62;
-        let pos = travel * (reel.len() - 1) as f32;
+        let mid_y = self.layout.h as i32; // sub-row centre of the frame
+        let scale = hero_scale("BREAKOUT", self.layout.w, 2);
+        let name_h = (7 * scale) as i32;
+        let pitch = name_h + name_h / 2 + 4;
+        let widest = reel
+            .iter()
+            .map(|k| chrome_word_w(k.name(), scale))
+            .fold(0, usize::max) as i32;
+
+        let win_w = (widest + 14).min(self.layout.w as i32 - 6);
+        let win_h = pitch + name_h;
+        let wx0 = (self.layout.w as i32 - win_w) / 2;
+        let wy0 = mid_y - win_h / 2;
+        let (ix0, ix1) = (wx0 + 2, wx0 + win_w - 3);
+        let (iy0, iy1) = (wy0 + 2, wy0 + win_h - 3);
+
+        // Strip position in slots, with the landing bounce: past the detent
+        // and back, spent as the slam decays.
+        let bounce = self.slam * self.slam * 0.22;
+        let pos = travel * (reel.len() - 1) as f32 + if travel >= 1.0 { bounce } else { 0.0 };
+
         for (i, k) in reel.iter().enumerate() {
-            let dx = (i as f32 - pos) * pitch;
-            let near = 1.0 - (dx.abs() / l_w).min(1.0);
-            if near < 0.2 {
+            let dy = ((i as f32 - pos) * pitch as f32) as i32;
+            if dy.abs() > win_h {
                 continue;
             }
-            // The one at the centre is big and arriving; the ones either side
-            // are small and already gone.
-            let scale = if near > 0.82 {
-                hero_scale(k.name(), self.layout.w, 3)
-            } else {
-                1
-            };
-            chrome_word(&mut self.buf, k.name(), scale, l_w * 0.5 + dx, mid);
-            // On the frames right after it stops, the winner is drawn again a
-            // step off itself. Two frames of double image is what a thing
+            let cy = mid_y + dy;
+            chrome_word(&mut self.buf, k.name(), scale, l_w * 0.5, cy as f32);
+            // On the frames right after it stops, the winner is drawn again
+            // a step off itself — two frames of double image is what a thing
             // arriving hard looks like when it cannot actually be scaled.
-            if travel >= 1.0 && near > 0.82 && self.slam > 0.0 {
-                let off = self.slam * 3.0;
-                chrome_word(&mut self.buf, k.name(), scale, l_w * 0.5 + dx + off, mid);
+            if travel >= 1.0 && dy.abs() < pitch / 2 && self.slam > 0.6 {
+                chrome_word(
+                    &mut self.buf,
+                    k.name(),
+                    scale,
+                    l_w * 0.5 + self.slam * 3.0,
+                    cy as f32,
+                );
             }
         }
 
-        // Two hard bars marking the slot, clear of the longest name on the reel
-        // so they never sit on top of the word they are pointing at.
-        let widest = reel
-            .iter()
-            .map(|k| chrome_word_w(k.name(), 3) as f32)
-            .fold(0.0f32, f32::max);
-        let reach = (widest * 0.5 + 6.0).min(l_w * 0.5 - 3.0);
+        // Cut the strip back to the window: everything above and below the
+        // glass goes, inside the window columns only, so the names are
+        // sliced mid-letter as they enter and leave — the slicing is what
+        // sells the turn. The warp outside the columns is untouched.
+        let void = c(VOID);
+        for y in 0..self.buf.sh as i32 {
+            if y >= iy0 && y <= iy1 {
+                continue;
+            }
+            if (y - mid_y).abs() > win_h + name_h {
+                continue;
+            }
+            for x in wx0..wx0 + win_w {
+                put_base(&mut self.buf, x, y, void);
+            }
+        }
+        // The drum's curve, spent in the only currency a lit window has:
+        // rows near the lips fall away.
+        for (row, k) in [(0i32, 0.30f32), (1, 0.55), (2, 0.8)] {
+            dim_rows(&mut self.buf, ix0, ix1, iy0 + row, k);
+            dim_rows(&mut self.buf, ix0, ix1, iy1 - row, k);
+        }
+
+        // The window itself: a flat rail, lit toward the winner's hue as the
+        // strip slows, with detent marks pinching the payline.
+        let arriving = reel[((pos.round() as i64).clamp(0, reel.len() as i64 - 1)) as usize];
+        let rail = c(STEEL).lerp(arriving.hue(), travel * travel);
+        for t in 0..2 {
+            let (x0, y0, x1, y1) = (wx0 + t, wy0 + t, wx0 + win_w - 1 - t, wy0 + win_h - 1 - t);
+            for x in x0..=x1 {
+                put_base(&mut self.buf, x, y0, rail);
+                put_base(&mut self.buf, x, y1, rail);
+            }
+            for y in y0..=y1 {
+                put_base(&mut self.buf, x0, y, rail);
+                put_base(&mut self.buf, x1, y, rail);
+            }
+        }
         let hot = c(MAGENTA);
-        for side in [-1.0f32, 1.0] {
-            let x = (l_w * 0.5 + side * reach) as i32;
-            for dy in -12..=12i32 {
-                for ox in 0..2 {
-                    lit(&mut self.buf, x + ox, mid as i32 + dy, hot, hot);
+        for dy in -1..=1i32 {
+            for ox in 0..3 {
+                lit(&mut self.buf, wx0 - 1 - ox, mid_y + dy, hot, hot.mul(0.5));
+                lit(
+                    &mut self.buf,
+                    wx0 + win_w + ox,
+                    mid_y + dy,
+                    hot,
+                    hot.mul(0.5),
+                );
+            }
+        }
+        // The payout flash: the glass fires inverse for the first beats of
+        // the landing, which is the pixel half of the slam the strobe is
+        // already shouting.
+        if travel >= 1.0 && self.slam > 0.75 {
+            for y in iy0..=iy1 {
+                for x in ix0..=ix1 {
+                    let i = y as usize * self.buf.w + x as usize;
+                    let p = self.buf.base[i];
+                    self.buf.base[i] = Rgb::new(
+                        (1.0 - p.r).max(0.0),
+                        (1.0 - p.g).max(0.0),
+                        (1.0 - p.b).max(0.0),
+                    );
                 }
             }
         }
@@ -575,7 +652,7 @@ impl Stage {
 
     /// A game, running.
     pub fn game(&mut self, g: &dyn Game, tick: &Tick) {
-        self.open(g.heat());
+        self.open_bare();
         g.paint(&mut self.buf, &self.layout);
         self.feedback(g);
         self.close_playing(g, tick);
@@ -636,7 +713,7 @@ impl Stage {
     /// raster — the picture is visibly held rather than replaced, so it is
     /// obvious nothing has been lost.
     pub fn paused(&mut self, g: &dyn Game, tick: &Tick) {
-        self.open(0.0);
+        self.open_bare();
         g.paint(&mut self.buf, &self.layout);
         self.dim_all(0.35);
         let cx = self.layout.w as i32 / 2;
@@ -839,11 +916,65 @@ impl Stage {
     // ------------------------------------------------------------- plumbing
 
     /// Black ground and the warp behind everything.
+    /// Discrete bulbs chasing the frame edge, three lit then one dark,
+    /// stepping four times a second.
+    fn lamps(&mut self, t: f32) {
+        let w = self.buf.w as i32;
+        let sh = self.buf.sh as i32;
+        let step = 5;
+        let phase = (t * 4.0) as i32;
+        let on = c(YELLOW);
+        let off = c(IRON);
+        let mut n = 0;
+        let bulb = |b: &mut Buf, x: i32, y: i32, idx: i32| {
+            let lit_now = (idx + phase) % 4 != 3;
+            let colv = if lit_now { on } else { off };
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    put_base(b, x + dx, y + dy, colv);
+                }
+            }
+        };
+        let mut x = 2;
+        while x < w - 3 {
+            bulb(&mut self.buf, x, 1, n);
+            n += 1;
+            x += step;
+        }
+        let mut y = 1;
+        while y < sh - 8 {
+            bulb(&mut self.buf, w - 4, y, n);
+            n += 1;
+            y += step;
+        }
+        let mut x = w - 4;
+        while x > 2 {
+            bulb(&mut self.buf, x, sh - 9, n);
+            n += 1;
+            x -= step;
+        }
+        let mut y = sh - 9;
+        while y > 1 {
+            bulb(&mut self.buf, 2, y, n);
+            n += 1;
+            y -= step;
+        }
+    }
+
     fn open(&mut self, heat: f32) {
         ground(&mut self.buf);
         if self.quality.warp {
             self.warp.draw(&mut self.buf, heat);
         }
+    }
+
+    /// Ground only. The play screens run on clean black: a field flying
+    /// behind a game being *read* taxes exactly the attention the game
+    /// needs, and it was the last moving thing left under the playfield.
+    /// The warp keeps the screens with nothing to protect — the marquee,
+    /// the reel, the settle — where spectacle is the whole job.
+    fn open_bare(&mut self) {
+        ground(&mut self.buf);
     }
 
     /// Strip, rule, ticker, post, resolve — the same tail on every screen, so
@@ -1022,6 +1153,19 @@ fn place(i: usize) -> String {
 
 /// The largest chrome scale at or below `want` that still leaves the word clear
 /// of the frame edges.
+/// Attenuate one sub-row of the picture between two columns — the reel
+/// window's lip shading, where the drum curves away from the glass.
+fn dim_rows(b: &mut Buf, x0: i32, x1: i32, y: i32, k: f32) {
+    if y < 0 || y as usize >= b.sh {
+        return;
+    }
+    for x in x0.max(0)..=x1.min(b.w as i32 - 1) {
+        let i = y as usize * b.w + x as usize;
+        b.base[i] = b.base[i].mul(k);
+        b.emis[i] = b.emis[i].mul(k);
+    }
+}
+
 fn hero_scale(word: &str, w: usize, want: usize) -> usize {
     (1..=want)
         .rev()
