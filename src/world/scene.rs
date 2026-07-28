@@ -218,6 +218,11 @@ pub fn chrome_word(b: &mut Buf, text: &str, scale: usize, cx_px: f32, cy_sub: f3
                         continue;
                     }
                     let t = (gy * scale + sy) as f32 / (gh - 1.0);
+                    // Silkscreened rather than airbrushed: the same sweep, in
+                    // six flat bands with hard edges. The gleam line survives
+                    // as its own band, which is all a print run would have
+                    // given it.
+                    let t = ((t * 6.0).floor() + 0.5) / 6.0;
                     let c = ramp.at(t);
                     let lum = c.max_c();
                     for sx in 0..scale {
@@ -250,5 +255,20 @@ pub fn scanlines(px: &mut [Rgb], w: usize, sh: usize, k: f32) {
         for x in 0..w {
             px[y * w + x] = px[y * w + x].mul(k);
         }
+    }
+}
+
+/// Snap every channel to a fixed ladder of levels. This is the single pass
+/// that makes the picture read as an old machine's rather than an airbrush's:
+/// a bloom halo becomes concentric flat rings, a fade becomes steps, and
+/// nothing on screen can be a colour the palette does not have. Run after
+/// bloom and before the scanlines, so the raster texture stays a texture
+/// instead of being quantised into bands of its own.
+pub fn posterize(px: &mut [Rgb], levels: f32) {
+    let snap = |v: f32| (v * levels).round() / levels;
+    for p in px {
+        p.r = snap(p.r);
+        p.g = snap(p.g);
+        p.b = snap(p.b);
     }
 }

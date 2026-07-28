@@ -53,16 +53,14 @@ pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: 
     let ignite = ignite.clamp(0.0, 1.0);
     let col = hue.lerp(c(WHITE), ignite);
 
-    // Two rules: the inner one is the edge of the field, the outer one is dim
-    // and half a step away. One line reads as a hairline someone forgot to
-    // finish; two read as a rail with a shadow.
+    // One rail, two sub-pixels deep. A single sub-pixel line is a vector
+    // stroke, and nothing else on this screen is a vector any more — the rail
+    // is a fat rule like everything it contains. No glow at rest: a lit rail
+    // feeds the bloom pass, and bloom over a black field turns the rail into
+    // a soft grey band hanging off it. It gets its light back when it flares.
     let inner = (ax0 - 1, ay0 - 1, ax1 + 1, ay1 + 1);
     let outer = (ax0 - 2, ay0 - 2, ax1 + 2, ay1 + 2);
-    // No glow at rest. A lit rail feeds the bloom pass, and bloom over a black
-    // field turns a one-sub-pixel line into a soft grey band hanging above and
-    // below it — which reads as haze rather than as an edge, and is the ugliest
-    // thing a frame can do. It gets its light back only when it flares.
-    edge(b, outer, col.mul(0.18), col.mul(0.3 * ignite));
+    edge(b, outer, col.mul(0.85), col.mul(0.3 * ignite));
     edge(b, inner, col.mul(0.85), col.mul(1.1 * ignite));
 
     // Corners are the same rule run a little way along both edges. Nothing
@@ -168,7 +166,9 @@ pub fn floor(b: &mut Buf, l: &Layout, shake: i32, rule: Rule, filled: &dyn Fn(i3
     if rule == Rule::None {
         return;
     }
-    let tick = c(IRON);
+    // Bright enough to clear the posterize floor — at the old IRON level the
+    // whole lattice rounded to black and the field read as void.
+    let tick = c(IRON).mul(2.6);
     for mr in 0..l.rows as i32 {
         for mc in 0..l.cols as i32 {
             if filled(mc, mr) {

@@ -111,6 +111,11 @@ impl Warp {
     }
 
     pub fn draw(&self, b: &mut Buf, heat: f32) {
+        // A streak is a run of fat square dashes, not an airbrushed line: the
+        // head at full strength, the tail at one flat step down, and nothing
+        // in between. Two levels is all an old machine had, and it reads as
+        // speed just the same — the taper was never the point, the length was.
+        const T: i32 = 2;
         let near = hex(MAGENTA);
         let far = hex(CYAN);
         let stretch = self.stretch(heat);
@@ -122,23 +127,29 @@ impl Warp {
             let col = far.lerp(near, s.r);
             // Fade in out of the vanishing point and out again at the frame
             // edge, so nothing ever pops into or out of existence.
-            let alpha = smooth_edges(s.r) * (0.16 + 0.52 * s.weight);
-            let steps = (len.ceil() as i32).clamp(1, 64);
-            for i in 0..steps {
-                let t = i as f32 / steps as f32;
-                let r = r0 - t * len;
+            let alpha = smooth_edges(s.r) * (0.14 + 0.44 * s.weight);
+            let dashes = ((len / T as f32).ceil() as i32).clamp(1, 24);
+            let mut last = (i32::MIN, i32::MIN);
+            for i in 0..dashes {
+                let r = r0 - (i * T) as f32;
                 if r < 0.0 {
                     break;
                 }
-                // Taper the tail rather than ending it square: a hard-ended
-                // segment reads as a stick, a tapered one reads as speed.
-                let a = alpha * (1.0 - t) * (1.0 - t);
-                add_emis(
-                    b,
-                    (self.cx + s.dx * r) as i32,
-                    (self.cy + s.dy * r) as i32,
-                    col.mul(a),
-                );
+                // Snapped to the dash grid, and never the same block twice —
+                // near the vanishing point the dashes land on top of each
+                // other and would add up into a hot spot.
+                let bx = ((self.cx + s.dx * r) as i32).div_euclid(T) * T;
+                let by = ((self.cy + s.dy * r) as i32).div_euclid(T) * T;
+                if (bx, by) == last {
+                    continue;
+                }
+                last = (bx, by);
+                let a = if i * 3 < dashes { alpha } else { alpha * 0.4 };
+                for dy in 0..T {
+                    for dx in 0..T {
+                        add_emis(b, bx + dx, by + dy, col.mul(a));
+                    }
+                }
             }
         }
     }

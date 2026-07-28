@@ -157,18 +157,24 @@ impl Sparks {
 
     /// Emissive only, so debris never occludes the game under it and always
     /// blooms — the same reason the warp field is drawn this way.
+    ///
+    /// Chunky: a spark is a fat square snapped to a two-sub-pixel grid, and
+    /// its fade is three flat steps rather than a slide — debris off an old
+    /// machine went bright, dim, gone.
     pub fn draw(&self, b: &mut Buf, l: &Layout, shake: i32) {
+        const T: i32 = 2;
         let p = l.mino_px as f32;
         let (ox, oy) = l.cell_origin(0, 0, shake);
         for s in &self.items {
-            let px = ox as f32 + s.x * p;
-            let py = oy as f32 + s.y * p;
-            let fade = s.life * s.life;
-            let col = s.col.mul(fade * 1.3);
-            let r = (s.size * fade).max(1.0) as i32;
+            let px = ((ox as f32 + s.x * p) as i32).div_euclid(T) * T;
+            let py = ((oy as f32 + s.y * p) as i32).div_euclid(T) * T;
+            let fade = ((s.life * 3.0).ceil() / 3.0).powi(2);
+            let col = s.col.mul(fade * 1.2);
+            // Whole dashes only: one block, or four for the big pieces.
+            let r = if s.size * fade >= 1.6 { 2 * T } else { T };
             for dy in 0..r {
                 for dx in 0..r {
-                    add_emis(b, px as i32 + dx, py as i32 + dy, col);
+                    add_emis(b, px + dx, py + dy, col);
                 }
             }
         }

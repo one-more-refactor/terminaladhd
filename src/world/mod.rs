@@ -31,7 +31,7 @@ pub use encode::{
 };
 pub use layout::{Layout, Rect};
 pub use scene::{
-    bloom, chrome_ramp, chrome_word, chrome_word_w, palette, resolve_no_bloom, scanlines,
+    bloom, chrome_ramp, chrome_word, chrome_word_w, palette, posterize, resolve_no_bloom, scanlines,
     smoothstep, Buf, Ramp,
 };
 pub use spark::Sparks;

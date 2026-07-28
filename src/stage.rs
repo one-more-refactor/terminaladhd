@@ -26,9 +26,14 @@ use crate::world::Warp;
 /// Bloom radius, sample step and weight. Wider and hotter than a lit picture
 /// would want: on a black ground the bloom *is* the light, and a phosphor
 /// monitor bled a long way.
-const BLOOM: (usize, usize, f32) = (4, 2, 0.60);
+/// Tight and modest: on a chunky picture the glow is a rim, not an
+/// atmosphere. The old (4, 2, 0.60) airbrushed everything it touched.
+const BLOOM: (usize, usize, f32) = (2, 1, 0.32);
 /// How much darker every second sub-row is. A CRT hint, not a mask.
-const SCANLINE: f32 = 0.82;
+const SCANLINE: f32 = 0.80;
+/// Levels per channel after the post pass. Eight is enough that the hot hues
+/// keep their identity and few enough that every gradient visibly steps.
+const POSTER_LEVELS: f32 = 8.0;
 /// Colour-match tolerance when resolving sub-pixels to cells and when diffing
 /// them against the last frame, in 8-bit levels.
 ///
@@ -135,12 +140,17 @@ pub struct Quality {
 
 impl Quality {
     /// Everything on. What a local terminal gets.
+    ///
+    /// The hum and the vignette are off by default now, not for bytes but for
+    /// the look: both are smooth, filmic effects, and on a chunky picture
+    /// anything smooth reads as airbrush. The scanlines and the fringe carry
+    /// the tube on their own.
     pub const fn full() -> Quality {
         Quality {
             warp: true,
-            hum: true,
+            hum: false,
             fringe: true,
-            vignette: true,
+            vignette: false,
             bloom: true,
             scanlines: true,
             tol: TOL_RICH,
@@ -167,7 +177,7 @@ impl Quality {
             warp: true,
             hum: false,
             fringe: false,
-            vignette: true,
+            vignette: false,
             bloom: true,
             scanlines: true,
             tol: TOL_LEAN,
@@ -772,6 +782,10 @@ impl Stage {
         } else {
             crate::world::resolve_no_bloom(&self.buf, &mut self.px);
         }
+        // The step that makes it a machine's picture: every channel snapped
+        // to a short ladder, so halos ring, fades step, and nothing is a
+        // colour the palette does not have.
+        crate::world::posterize(&mut self.px, POSTER_LEVELS);
         if self.quality.scanlines {
             scanlines(&mut self.px, self.buf.w, self.buf.sh, SCANLINE);
         }
@@ -838,7 +852,9 @@ impl Stage {
             self.hum * 6.0,
         );
         crt::collapse(&mut self.px, &mut self.scratch, w, sh, self.curtain);
-        resolve_d(&self.px, w, sh, self.quality.tol, true, &mut self.cells);
+        // No dithering: dither exists to hide banding, and the bands are now
+        // the look.
+        resolve_d(&self.px, w, sh, self.quality.tol, false, &mut self.cells);
     }
 
     pub fn sub_pixels(&self) -> (&[Rgb], usize, usize) {
