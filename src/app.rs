@@ -233,7 +233,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
     stage.quality = quality;
     let frame_time = Duration::from_micros(1_000_000 / quality.fps.clamp(10, 120) as u64);
     let mut prev = vec![UNPAINTED; stage.w * stage.h];
-    let mut presenter = term::Presenter::new(stage.quality.tol);
+    let mut presenter = term::Presenter::new(stage.quality.tol, stage.quality.palette);
 
     let mut game = kind.spawn(Rng::new(), w0, h0);
     // The attract screen shows a game playing itself, and it is never the one
@@ -340,7 +340,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
         if machine.pending.is_some() {
             pad.release_all();
         }
-        let closing = machine.cut(STEP.as_secs_f32());
+        // The cut advances by *render* time, not by a sim step: at lean's
+        // thirty frames a STEP-clocked cut ran at half speed, and every
+        // screen change dragged.
+        let closing = machine.cut(frame_time.as_secs_f32());
         stage.curtain = machine.curtain;
         // On the way back in the picture is still bending; on the way out it is
         // already gone, so there is nothing to bend.
@@ -482,7 +485,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                     right: tick.right.clone(),
                 };
                 let idle = since.elapsed().as_secs_f32();
-                let t = frame_no as f32 * STEP.as_secs_f32();
+                let t = frame_no as f32 * frame_time.as_secs_f32();
                 if ((idle / ATTRACT_CYCLE) as u32).is_multiple_of(2) {
                     stage.attract(demo.as_ref(), scores.best(demo_kind), t, &teach);
                 } else {

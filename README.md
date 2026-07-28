@@ -12,6 +12,22 @@ adhd                    play until you quit
 adhd -- cargo build     play while that runs, exit with its code
 ```
 
+## Building
+
+```
+cargo build --release
+./target/release/adhd
+```
+
+No system dependencies. `--size WxH` forces a size, `--bench` reports what a
+frame costs, and `--shot DIR` dumps every screen — attract, spin, both games,
+game over, the board — as PPM, for reviewing a rendering change without a
+terminal in the way.
+
+`DESIGN.md` is the long version: why the screen is shaped this way, what a
+frame costs and where it goes, what was tried and thrown away, and what it
+would take to add a third game.
+
 ## You do not pick the game
 
 The wheel picks. Names fly through the warp toward you, the wheel fights to a
@@ -140,18 +156,3 @@ It needs 60×24, so a terminal app in landscape is comfortable and portrait
 works if the font is small enough. Add `-C` to your `ssh` command and the ANSI
 compresses well on top of all this.
 
-## Building
-
-```
-cargo build --release
-./target/release/adhd
-```
-
-No system dependencies. `--size WxH` forces a size, `--bench` reports what a
-frame costs, and `--shot DIR` dumps every screen — attract, spin, both games,
-game over, the board — as PPM, for reviewing a rendering change without a
-terminal in the way.
-
-`DESIGN.md` is the long version: why the screen is shaped this way, what a
-frame costs and where it goes, what was tried and thrown away, and what it
-would take to add a third game.

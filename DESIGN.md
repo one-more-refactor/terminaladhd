@@ -236,8 +236,9 @@ drifted was everything around it.
 
 The field was 20×20. A square arena leaves the player equidistant from
 everything and the game loses its rhythm — long runs into tight corners is what
-snake *is*. It is 26×14 now, about twice as wide as it is tall, which is both
-the shape the game has always been played on and the shape of a terminal.
+snake *is*. It is fourteen rows and as many columns as the width affords — never
+square, always the shape the game has been played on and the shape of a
+terminal.
 
 The bonus apple used to grow the snake by three cells. The bonus is already the
 risk of crossing the field for it under a clock; charging extra length on top

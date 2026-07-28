@@ -20,7 +20,7 @@ use crossterm::{
 };
 
 use crate::games::{Taps, Turn};
-use crate::world::{enc_diff, Cell};
+use crate::world::{enc_diff, Cell, DiffOpts};
 
 /// Used when the terminal will not say how big it is (a pipe, a CI log).
 pub const FALLBACK_SIZE: (usize, usize) = (120, 34);
@@ -108,18 +108,27 @@ pub fn enable_key_release() -> bool {
     if !matches!(terminal::supports_keyboard_enhancement(), Ok(true)) {
         return false;
     }
-    io::stderr()
+    let pushed = io::stderr()
         .execute(PushKeyboardEnhancementFlags(
             // Releases for the arrows, and all keys as escape codes so plain
             // letters — wasd, hjkl — get them too.
             KeyboardEnhancementFlags::REPORT_EVENT_TYPES
                 | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES,
         ))
-        .is_ok()
+        .is_ok();
+    PUSHED.store(pushed, std::sync::atomic::Ordering::Relaxed);
+    pushed
 }
 
+/// Whether the enhancement push actually happened, so the restore only pops
+/// what was pushed — popping an empty stack is undefined ground on some
+/// terminals.
+static PUSHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn disable_key_release() {
-    let _ = io::stderr().execute(PopKeyboardEnhancementFlags);
+    if PUSHED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        let _ = io::stderr().execute(PopKeyboardEnhancementFlags);
+    }
 }
 
 impl Drop for Guard {
@@ -150,6 +159,8 @@ pub struct Presenter {
     /// Matched to the stage's own resolve tolerance, or the diff will re-send
     /// cells the resolver already decided were the same.
     pub tol: i32,
+    /// Emit xterm-256 codes instead of truecolor — lean mode's wire dialect.
+    pub palette: bool,
 }
 
 /// The run-joining gap: cells this far apart are worth re-addressing rather
@@ -157,9 +168,10 @@ pub struct Presenter {
 const GAP: usize = 6;
 
 impl Presenter {
-    pub fn new(tol: i32) -> Self {
+    pub fn new(tol: i32, palette: bool) -> Self {
         Presenter {
             tol,
+            palette,
             ..Default::default()
         }
     }
@@ -167,7 +179,18 @@ impl Presenter {
     /// One atomic present: DEC 2026 brackets the whole diff so a burst lands as
     /// a single update instead of tearing across the scanout.
     pub fn frame(&mut self, cells: &[Cell], prev: &mut [Cell], w: usize, h: usize) -> Result<()> {
-        enc_diff(cells, prev, w, h, self.tol, GAP, &mut self.body);
+        enc_diff(
+            cells,
+            prev,
+            w,
+            h,
+            DiffOpts {
+                tol: self.tol,
+                gap: GAP,
+                palette: self.palette,
+            },
+            &mut self.body,
+        );
         self.out.clear();
         self.out.extend_from_slice(b"\x1b[?2026h");
         self.out.extend_from_slice(&self.body);
@@ -264,7 +287,10 @@ impl Keys {
             KeyCode::Char('j') | KeyCode::Char('J') | KeyCode::Char('s') | KeyCode::Char('S')
                 if !ctrl =>
             {
-                self.down = true
+                // The same batch rule as arrow-Down: a rotate and a soft drop
+                // in one poll resolve to the drop, whichever key said it.
+                self.down = true;
+                self.cw = false;
             }
             KeyCode::Char('k') | KeyCode::Char('K') | KeyCode::Char('w') | KeyCode::Char('W')
                 if !ctrl =>
@@ -386,13 +412,6 @@ impl Pad {
             held: [false; DIRS],
             seen: [None; DIRS],
         }
-    }
-
-    /// Whether this terminal can tell us a key went up. Worth surfacing: on one
-    /// that cannot, movement is at the mercy of the operating system's repeat
-    /// delay and there is nothing the game can do about it.
-    pub fn precise(&self) -> bool {
-        self.releases
     }
 
     /// Non-blocking: fold every pending event into one [`Poll`], and carry the

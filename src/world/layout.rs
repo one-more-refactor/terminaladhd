@@ -40,8 +40,6 @@ const BOTTOM_ROWS: usize = 3;
 /// way — a phone held in portrait would otherwise get no game at all.
 const TICKER_FLOOR: usize = 26;
 
-/// One row kept under the arena for the sub-pixels its border is drawn on.
-const FRAME_ROOM: usize = 1;
 /// Columns kept either side of the arena for the same reason. The border is two
 /// rules deep, and an arena pushed against the frame edge loses one of them.
 const BORDER: usize = 2;
@@ -117,10 +115,12 @@ impl Layout {
         // a side column on each flank. Nothing else competes for the space:
         // there is no scenery to protect, so the game takes what there is.
         let ticker = h >= TICKER_FLOOR;
-        // Without a ticker the arena still cannot run to the last row: its
-        // frame is drawn a sub-pixel outside it, and that sub-pixel has to
-        // land somewhere.
-        let below = if ticker { BOTTOM_ROWS } else { FRAME_ROOM };
+        // The bottom rows belong to the strip whether or not there is room
+        // for the ticker: at exactly the minimum size the arena used to run
+        // into the rows the score is drawn on, and the status text overwrote
+        // the bottom of the well. A slightly smaller mino beats a game with
+        // chrome stamped through its floor.
+        let below = BOTTOM_ROWS;
         let body = h.saturating_sub(TOP_ROWS + below);
         let mino_px = MINO_SIZES
             .into_iter()

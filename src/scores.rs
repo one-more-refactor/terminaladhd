@@ -106,12 +106,22 @@ impl Table {
                 out.push_str(&format!("{} {} {}\n", kind.slug(), e.score, e.at));
             }
         }
+        // Slugs this build does not know still get written back: an older
+        // binary saving the table must not wipe a newer game's records.
+        let known: Vec<&str> = crate::games::ALL.iter().map(|k| k.slug()).collect();
+        for (slug, e) in &self.rows {
+            if !known.contains(&slug.as_str()) {
+                out.push_str(&format!("{} {} {}\n", slug, e.score, e.at));
+            }
+        }
         if let Some(dir) = path.parent() {
             let _ = fs::create_dir_all(dir);
         }
         // Write beside the target and rename over it, so an interrupted save
         // leaves the previous table intact rather than a half-written one.
-        let tmp = path.with_extension("tmp");
+        // The scratch name carries the pid: two instances finishing games at
+        // once must not write through each other's temporary file.
+        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
         let wrote = fs::File::create(&tmp).and_then(|mut f| {
             f.write_all(out.as_bytes())?;
             f.sync_all()

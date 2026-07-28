@@ -23,12 +23,8 @@ pub mod spark;
 pub mod tiny;
 pub mod warp;
 
-pub use color::{
-    bayer4, hex, linear_to_srgb, srgb_to_linear, to_16, to_256, to_256_d, to_srgb8, Rgb, ANSI16,
-};
-pub use encode::{
-    enc_16, enc_256, enc_diff, enc_naive, enc_stateful, resolve, resolve_d, Cell, UPPER_HALF,
-};
+pub use color::{bayer4, hex, linear_to_srgb, srgb_to_linear, to_srgb8, Rgb};
+pub use encode::{enc_diff, resolve, resolve_d, Cell, DiffOpts, UPPER_HALF};
 pub use layout::{Layout, Rect};
 pub use scene::{
     bloom, chrome_ramp, chrome_word, chrome_word_w, palette, posterize, resolve_no_bloom,

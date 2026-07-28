@@ -24,8 +24,6 @@ pub const LOCK_DELAY: Duration = Duration::from_millis(500);
 /// Moves and turns that may each buy back the lock window. Uncapped, a piece
 /// left endlessly fiddled with would never lock at all.
 pub const LOCK_RESETS: u32 = 15;
-/// Entry delay between locking one piece and the next appearing — none.
-pub const ARE: Duration = Duration::ZERO;
 
 /// Soft-drop interval for a given natural gravity interval: the faster of
 /// SDF× gravity and the floor, so at high levels it is capped rather than

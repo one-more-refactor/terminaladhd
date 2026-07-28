@@ -14,7 +14,7 @@
 use crate::rng::Rng;
 use crate::world::draw::add_emis;
 use crate::world::scene::palette::*;
-use crate::world::{hex, Buf, Rgb};
+use crate::world::{hex, Buf};
 
 /// Sub-pixels of screen per streak. Sparse enough that the field reads as
 /// motion rather than as static, dense enough that it never looks empty.
@@ -183,12 +183,6 @@ fn spawn(rng: &mut Rng) -> Streak {
         r: BIRTH,
         weight: frac(rng),
     }
-}
-
-/// The one colour the rest of the machine takes from here: what a streak looks
-/// like where it is brightest, for anything that wants to match the field.
-pub fn field_hue() -> Rgb {
-    hex(CYAN)
 }
 
 #[cfg(test)]

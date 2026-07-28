@@ -1,5 +1,5 @@
 // 5x7 chrome face, one u8 per row, bit 4 = leftmost column. This is a taller
-// face than the handset's 3x5 `crate::font`: the chrome wordmark samples the
+// face than the 3x5 `world::tiny`: the chrome wordmark samples the
 // steel-to-magenta band per glyph-row, and seven rows are the minimum that
 // resolves the specular highlight and the reflected-sun underglow as separate
 // bands.

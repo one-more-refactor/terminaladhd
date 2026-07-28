@@ -110,6 +110,64 @@ fn sgr_both(o: &mut Vec<u8>, fg: [u8; 3], bg: [u8; 3]) {
     o.push(b'm');
 }
 
+/// Nearest xterm-256 index for an sRGB cell colour: the 6x6x6 cube or the
+/// grey ramp, whichever is closer. On the wire a palette pair is a third of a
+/// truecolor pair, and a phone terminal parses it in a fraction of the time —
+/// which is the whole reason lean mode speaks palette.
+fn srgb_to_256(c: [u8; 3]) -> u8 {
+    const LV: [i16; 6] = [0, 95, 135, 175, 215, 255];
+    let near_lv = |v: u8| -> usize {
+        let v = v as i16;
+        let mut best = 0;
+        let mut bd = i16::MAX;
+        for (i, l) in LV.iter().enumerate() {
+            let d = (v - l).abs();
+            if d < bd {
+                bd = d;
+                best = i;
+            }
+        }
+        best
+    };
+    let (ri, gi, bi) = (near_lv(c[0]), near_lv(c[1]), near_lv(c[2]));
+    let cube = [LV[ri], LV[gi], LV[bi]];
+    let cube_idx = 16 + 36 * ri + 6 * gi + bi;
+    // Grey ramp: 232..=255 at 8 + 10k.
+    let avg = (c[0] as i16 + c[1] as i16 + c[2] as i16) / 3;
+    let k = ((avg - 8).max(0) / 10).min(23);
+    let grey = 8 + 10 * k;
+    let d2 = |a: [i16; 3]| -> i32 {
+        (0..3)
+            .map(|i| (c[i] as i32 - a[i] as i32).pow(2))
+            .sum::<i32>()
+    };
+    if d2([grey, grey, grey]) < d2(cube) {
+        (232 + k) as u8
+    } else {
+        cube_idx as u8
+    }
+}
+
+fn sgr_fg_256(o: &mut Vec<u8>, i: u8) {
+    o.extend_from_slice(b"\x1b[38;5;");
+    push_u8(o, i);
+    o.push(b'm');
+}
+
+fn sgr_bg_256(o: &mut Vec<u8>, i: u8) {
+    o.extend_from_slice(b"\x1b[48;5;");
+    push_u8(o, i);
+    o.push(b'm');
+}
+
+fn sgr_both_256(o: &mut Vec<u8>, fg: u8, bg: u8) {
+    o.extend_from_slice(b"\x1b[38;5;");
+    push_u8(o, fg);
+    o.extend_from_slice(b";48;5;");
+    push_u8(o, bg);
+    o.push(b'm');
+}
+
 fn goto(o: &mut Vec<u8>, row: usize, col: usize) {
     o.extend_from_slice(b"\x1b[");
     // Clamped, not truncated: a row past 254 would wrap to the top of the
@@ -131,73 +189,16 @@ fn goto(o: &mut Vec<u8>, row: usize, col: usize) {
     o.push(b'H');
 }
 
-// -------------------------------------------------------------- strategy A
-
-/// Emit both colours for every single cell. This is the shape most naive
-/// terminal renderers take and it is the number the design has to beat.
-pub fn enc_naive(cells: &[Cell], w: usize, h: usize, o: &mut Vec<u8>) {
-    o.clear();
-    for y in 0..h {
-        goto(o, y, 0);
-        for x in 0..w {
-            let c = cells[y * w + x];
-            sgr_both(o, c.fg, c.bg);
-            if c.half {
-                o.extend_from_slice(UPPER_HALF.as_bytes());
-            } else {
-                o.push(b' ');
-            }
-        }
-    }
+/// How a diff is encoded: the colour-match tolerance, the run-joining gap
+/// (unchanged cells cheaper to repaint through than to re-address past), and
+/// whether the wire speaks xterm-256 instead of truecolor.
+#[derive(Clone, Copy, Debug)]
+pub struct DiffOpts {
+    pub tol: i32,
+    pub gap: usize,
+    pub palette: bool,
 }
 
-// -------------------------------------------------------------- strategy B
-
-/// Track the terminal's current fg/bg and emit only what actually changes.
-/// `tol` lets a colour within N 8-bit steps of the one already set pass without
-/// an escape at all -- the single biggest win on smooth gradients.
-pub fn enc_stateful(cells: &[Cell], w: usize, h: usize, tol: i32, o: &mut Vec<u8>) {
-    o.clear();
-    let mut cur_fg: Option<[u8; 3]> = None;
-    let mut cur_bg: Option<[u8; 3]> = None;
-    for y in 0..h {
-        goto(o, y, 0);
-        for x in 0..w {
-            let c = cells[y * w + x];
-            // A space shows only its background, so the foreground register can
-            // be left stale -- skipping it costs nothing visually.
-            let need_fg = c.half && !cur_fg.is_some_and(|p| near(p, c.fg, tol));
-            let need_bg = !cur_bg.is_some_and(|p| near(p, c.bg, tol));
-            match (need_fg, need_bg) {
-                (true, true) => {
-                    sgr_both(o, c.fg, c.bg);
-                    cur_fg = Some(c.fg);
-                    cur_bg = Some(c.bg);
-                }
-                (true, false) => {
-                    sgr_fg(o, c.fg);
-                    cur_fg = Some(c.fg);
-                }
-                (false, true) => {
-                    sgr_bg(o, c.bg);
-                    cur_bg = Some(c.bg);
-                }
-                (false, false) => {}
-            }
-            if c.half {
-                o.extend_from_slice(UPPER_HALF.as_bytes());
-            } else {
-                o.push(b' ');
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------- strategy C
-
-/// Damage-tracked: compare against the previously presented frame and repaint
-/// only cells that differ, jumping the cursor over untouched spans. `gap` is
-/// the number of unchanged cells it is still cheaper to repaint than to skip.
 /// `prev` is what is actually on the terminal, and this function keeps it
 /// true: painted cells are written back, skipped cells keep their old value.
 /// Diffing intended-against-intended instead let a slow fade walk under the
@@ -209,13 +210,15 @@ pub fn enc_diff(
     prev: &mut [Cell],
     w: usize,
     h: usize,
-    tol: i32,
-    gap: usize,
+    d: DiffOpts,
     o: &mut Vec<u8>,
 ) {
+    let DiffOpts { tol, gap, palette } = d;
     o.clear();
     let mut cur_fg: Option<[u8; 3]> = None;
     let mut cur_bg: Option<[u8; 3]> = None;
+    let mut cur_fg_i: Option<u8> = None;
+    let mut cur_bg_i: Option<u8> = None;
 
     let same = |a: &Cell, b: &Cell| -> bool {
         a.half == b.half && near(a.bg, b.bg, tol) && (!a.half || near(a.fg, b.fg, tol))
@@ -252,6 +255,34 @@ pub fn enc_diff(
             for k in start..=end {
                 let c = cells[row + k];
                 prev[row + k] = c;
+                if palette {
+                    let fi = srgb_to_256(c.fg);
+                    let bi = srgb_to_256(c.bg);
+                    let need_fg = c.half && cur_fg_i != Some(fi);
+                    let need_bg = cur_bg_i != Some(bi);
+                    match (need_fg, need_bg) {
+                        (true, true) => {
+                            sgr_both_256(o, fi, bi);
+                            cur_fg_i = Some(fi);
+                            cur_bg_i = Some(bi);
+                        }
+                        (true, false) => {
+                            sgr_fg_256(o, fi);
+                            cur_fg_i = Some(fi);
+                        }
+                        (false, true) => {
+                            sgr_bg_256(o, bi);
+                            cur_bg_i = Some(bi);
+                        }
+                        (false, false) => {}
+                    }
+                    if c.half {
+                        o.extend_from_slice(UPPER_HALF.as_bytes());
+                    } else {
+                        o.push(b' ');
+                    }
+                    continue;
+                }
                 let need_fg = c.half && !cur_fg.is_some_and(|p| near(p, c.fg, tol));
                 let need_bg = !cur_bg.is_some_and(|p| near(p, c.bg, tol));
                 match (need_fg, need_bg) {
@@ -277,72 +308,6 @@ pub fn enc_diff(
                 }
             }
             x = end + 1;
-        }
-    }
-}
-
-// ---------------------------------------------------------- reduced palettes
-
-pub fn enc_256(px: &[Rgb], w: usize, h: usize, o: &mut Vec<u8>) {
-    o.clear();
-    let mut cur_fg: Option<u8> = None;
-    let mut cur_bg: Option<u8> = None;
-    for y in 0..h {
-        goto(o, y, 0);
-        for x in 0..w {
-            let t = to_256(px[(2 * y) * w + x]);
-            let b = to_256(px[(2 * y + 1) * w + x]);
-            if t == b {
-                if cur_bg != Some(b) {
-                    o.extend_from_slice(b"\x1b[48;5;");
-                    push_u8(o, b);
-                    o.push(b'm');
-                    cur_bg = Some(b);
-                }
-                o.push(b' ');
-            } else {
-                if cur_fg != Some(t) {
-                    o.extend_from_slice(b"\x1b[38;5;");
-                    push_u8(o, t);
-                    o.push(b'm');
-                    cur_fg = Some(t);
-                }
-                if cur_bg != Some(b) {
-                    o.extend_from_slice(b"\x1b[48;5;");
-                    push_u8(o, b);
-                    o.push(b'm');
-                    cur_bg = Some(b);
-                }
-                o.extend_from_slice(UPPER_HALF.as_bytes());
-            }
-        }
-    }
-}
-
-pub fn enc_16(px: &[Rgb], w: usize, h: usize, o: &mut Vec<u8>) {
-    o.clear();
-    let mut cur_fg: Option<u8> = None;
-    let mut cur_bg: Option<u8> = None;
-    for y in 0..h {
-        goto(o, y, 0);
-        for x in 0..w {
-            let t = to_16(px[(2 * y) * w + x]);
-            let b = to_16(px[(2 * y + 1) * w + x]);
-            // background can only use the 8 non-bright slots on many terminals
-            let bbg = if b >= 90 { b - 90 + 40 } else { b - 30 + 40 };
-            if cur_fg != Some(t) {
-                o.extend_from_slice(b"\x1b[");
-                push_u8(o, t);
-                o.push(b'm');
-                cur_fg = Some(t);
-            }
-            if cur_bg != Some(bbg) {
-                o.extend_from_slice(b"\x1b[");
-                push_u8(o, bbg);
-                o.push(b'm');
-                cur_bg = Some(bbg);
-            }
-            o.extend_from_slice(UPPER_HALF.as_bytes());
         }
     }
 }

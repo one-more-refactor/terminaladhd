@@ -101,6 +101,9 @@ pub struct Stage {
     buf: Buf,
     px: Vec<Rgb>,
     scratch: Vec<Rgb>,
+    /// The bloom's two working buffers, kept so a frame allocates nothing.
+    blur_a: Vec<Rgb>,
+    blur_b: Vec<Rgb>,
     pub cells: Vec<Cell>,
 }
 
@@ -119,6 +122,11 @@ pub struct Quality {
     pub vignette: bool,
     pub bloom: bool,
     pub scanlines: bool,
+    /// Speak xterm-256 on the wire instead of truecolor. A palette pair is a
+    /// third of the bytes and parses in a fraction of the time on a phone
+    /// terminal; the picture quantises to the 6x6x6 cube, which the posterize
+    /// pass has already half-done anyway.
+    pub palette: bool,
     /// Colour-match tolerance, in 8-bit levels. The dial that actually governs
     /// what a frame costs.
     pub tol: i32,
@@ -153,6 +161,7 @@ impl Quality {
             vignette: false,
             bloom: true,
             scanlines: true,
+            palette: false,
             tol: TOL_RICH,
             fps: 60,
             strobe_cap: usize::MAX,
@@ -180,6 +189,7 @@ impl Quality {
             vignette: false,
             bloom: true,
             scanlines: true,
+            palette: true,
             tol: TOL_LEAN,
             fps: 30,
             strobe_cap: 4,
@@ -340,6 +350,8 @@ impl Stage {
             buf: Buf::new(w, h),
             px: Vec::new(),
             scratch: Vec::new(),
+            blur_a: Vec::new(),
+            blur_b: Vec::new(),
             cells: Vec::new(),
         }
     }
@@ -868,7 +880,15 @@ impl Stage {
     /// off — the picture still has to be resolved either way.
     fn post(&mut self) {
         if self.quality.bloom {
-            bloom(&mut self.buf, BLOOM.0, BLOOM.1, BLOOM.2, &mut self.px);
+            bloom(
+                &mut self.buf,
+                BLOOM.0,
+                BLOOM.1,
+                BLOOM.2,
+                &mut self.blur_a,
+                &mut self.blur_b,
+                &mut self.px,
+            );
         } else {
             crate::world::resolve_no_bloom(&self.buf, &mut self.px);
         }

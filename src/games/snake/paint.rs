@@ -208,9 +208,18 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Snake) {
     // stutters when the frame rate does.
     let t = g.elapsed.as_secs_f32();
 
-    let occupied: Vec<(i32, i32)> = g.body().iter().copied().collect();
+    // A bitmap, not a list: the lattice asks about every cell and a linear
+    // scan of the body per cell made an empty-looking pass O(body x cells) —
+    // half a million comparisons a frame on a long snake.
+    let (cols, rows) = (g.cols(), g.rows());
+    let mut occupied = vec![false; (cols * rows) as usize];
+    for &(x, y) in g.body() {
+        if (0..cols).contains(&x) && (0..rows).contains(&y) {
+            occupied[(y * cols + x) as usize] = true;
+        }
+    }
     floor(b, l, shake, Rule::Lattice, &|mc, mr| {
-        occupied.contains(&(mc, mr))
+        (0..cols).contains(&mc) && (0..rows).contains(&mr) && occupied[(mr * cols + mc) as usize]
     });
     // The frame flares when an apple lands and when the run ends. It is the
     // only time it is allowed to be brighter than the field.

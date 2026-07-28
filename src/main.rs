@@ -331,7 +331,7 @@ fn bench(w: usize, h: usize) -> Result<()> {
     use std::time::{Duration, Instant};
     use terminaladhd::games::Kind;
     use terminaladhd::stage::{Quality, Stage, Tick};
-    use terminaladhd::world::{enc_diff, Cell};
+    use terminaladhd::world::{enc_diff, Cell, DiffOpts};
 
     const FRAMES: usize = 300;
     let tick = Tick {
@@ -355,7 +355,18 @@ fn bench(w: usize, h: usize) -> Result<()> {
             game.step(&input, Duration::from_millis(16));
             stage.animate(0.016, game.heat());
             stage.game(game.as_ref(), &tick);
-            enc_diff(&stage.cells, &mut prev, w, h, q.tol, 6, &mut out);
+            enc_diff(
+                &stage.cells,
+                &mut prev,
+                w,
+                h,
+                DiffOpts {
+                    tol: q.tol,
+                    gap: 6,
+                    palette: q.palette,
+                },
+                &mut out,
+            );
             total += out.len();
         }
         let cpu_ms = started.elapsed().as_secs_f64() * 1000.0 / FRAMES as f64;
@@ -448,8 +459,8 @@ fn run() -> Result<i32> {
     }
 
     // Over SSH every frame is bytes on a wire, and on a phone it may be bytes
-    // on a cellular plan. Measured on a 120x34 frame: 498 KB/s rich, 54 KB/s
-    // lean. Nobody should have to know that before it is usable, so the default
+    // on a cellular plan. Measured on a 120x34 frame: ~160 KB/s rich; lean
+    // speaks xterm-256 at 30 fps and lands near 25 KB/s. Nobody should have to know that before it is usable, so the default
     // follows the link.
     let quality = match args.lean {
         Some(true) => Quality::lean(),

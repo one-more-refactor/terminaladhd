@@ -109,11 +109,24 @@ pub fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 /// Separable box blur run twice ~= Gaussian, on the emissive buffer only.
 /// Horizontal radius is doubled because a sub-pixel is square but the *glow*
 /// should look isotropic in cell terms; in practice 2:1 matches the eye.
-pub fn bloom(b: &mut Buf, rx: usize, ry: usize, gain: f32, out: &mut Vec<Rgb>) {
+/// `tmp` and `cur` are caller-owned scratch, resized here: two full-frame
+/// buffers allocated per frame was two megabytes a frame on a large terminal,
+/// in a function whose caller's doc says a frame allocates nothing.
+pub fn bloom(
+    b: &mut Buf,
+    rx: usize,
+    ry: usize,
+    gain: f32,
+    tmp: &mut Vec<Rgb>,
+    cur: &mut Vec<Rgb>,
+    out: &mut Vec<Rgb>,
+) {
     let w = b.w;
     let sh = b.sh;
-    let mut tmp = vec![Rgb::ZERO; w * sh];
-    let mut cur = b.emis.clone();
+    tmp.clear();
+    tmp.resize(w * sh, Rgb::ZERO);
+    cur.clear();
+    cur.extend_from_slice(&b.emis);
 
     for _ in 0..2 {
         // horizontal, sliding window
@@ -157,7 +170,7 @@ pub fn bloom(b: &mut Buf, rx: usize, ry: usize, gain: f32, out: &mut Vec<Rgb>) {
 
     out.clear();
     out.reserve(w * sh);
-    for ((base, emis), blurred) in b.base.iter().zip(&b.emis).zip(&cur) {
+    for ((base, emis), blurred) in b.base.iter().zip(&b.emis).zip(cur.iter()) {
         out.push(base.add(*emis).add(blurred.mul(gain)));
     }
 }
@@ -198,7 +211,10 @@ pub fn chrome_word_w(text: &str, scale: usize) -> usize {
 /// Opaque: replaces `base`, and only the bright bands feed `emis` so the
 /// lettering blooms without the dark serifs smearing.
 pub fn chrome_word(b: &mut Buf, text: &str, scale: usize, cx_px: f32, cy_sub: f32) {
-    let ramp = chrome_ramp();
+    // Built once: the ramp is a constant, and rebuilding its stop list for
+    // every word on every frame was an allocation with no information in it.
+    static RAMP: std::sync::OnceLock<Ramp> = std::sync::OnceLock::new();
+    let ramp = RAMP.get_or_init(chrome_ramp);
     let gw = (font::W + 1) * scale;
     let n = text.chars().count();
     if n == 0 {
