@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # arm64 builds on a native runner rather than cross-compiling — the
+          # boxes that run this are arm64, and a native build is both faster
+          # and one less toolchain to keep working.
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: rustup target add ${{ matrix.target }}
+
+      - name: install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # The crate is terminaladhd; the binary you actually type is `adhd`.
+      - name: package
+        run: >
+          tar -czf "terminaladhd-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
+          -C "target/${{ matrix.target }}/release" adhd
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.target }}
+          path: terminaladhd-*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: tarball-*
+          merge-multiple: true
+
+      # An updater that downloads and then *executes* these is only as safe as
+      # its ability to tell it got the right bytes. Publish checksums so the
+      # install side can verify rather than trust.
+      - name: checksums
+        working-directory: dist
+        run: sha256sum terminaladhd-*.tar.gz > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/terminaladhd-*.tar.gz
+            dist/SHA256SUMS
