@@ -209,6 +209,15 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
         dump(&stage, "motion")?;
     }
 
+    // The quiet screens before the loud ones: a fired strobe outlives its
+    // frame by design, and a help screen shot through its afterglow reads as
+    // a rendering bug rather than as the help screen.
+    stage.help(Kind::Tetris, &tick);
+    dump(&stage, "help")?;
+
+    stage.paused(mid.as_ref(), &tick);
+    dump(&stage, "paused")?;
+
     // Every beat of the loudest reaction the machine has, so a still can show
     // what a Tetris actually looks like rather than only describing it.
     stage.fire(
@@ -219,12 +228,6 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
         stage.game(mid.as_ref(), &tick);
         dump(&stage, &format!("huge-{i}"))?;
     }
-
-    stage.help(Kind::Tetris, &tick);
-    dump(&stage, "help")?;
-
-    stage.paused(mid.as_ref(), &tick);
-    dump(&stage, "paused")?;
 
     stage.tear = 9.0;
     stage.fringe = 6.0;

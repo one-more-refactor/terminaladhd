@@ -614,7 +614,13 @@ impl Stage {
     pub fn help(&mut self, kind: Kind, tick: &Tick) {
         self.open(0.1);
         let cx = self.layout.w as i32 / 2;
-        let scale = hero_scale("CONTROLS", self.layout.w, 2);
+        // The title gives up its double height before the table gives up a
+        // row: on a short frame the words are the point.
+        let scale = if self.layout.h * 2 < 88 {
+            1
+        } else {
+            hero_scale("CONTROLS", self.layout.w, 2)
+        };
         let th = 7 * scale as i32;
         // Hung off the rule, or the title's top band is drawn through the
         // status strip — the same rule the board follows.
@@ -627,34 +633,48 @@ impl Stage {
             title_cy as f32,
         );
 
-        let rows: [(&str, &str); 7] = [
-            ("WASD  ARROWS  HJKL", "MOVE AND STEER"),
-            ("X  UP", "ROTATE"),
-            ("Z", "ROTATE BACK"),
-            ("SPACE", "HARD DROP"),
-            ("C", "HOLD"),
-            ("P", "PAUSE"),
-            ("ESC", "LEAVE, AGAIN TO QUIT"),
-        ];
-        // Two columns on one gutter: keys right-aligned into the middle,
-        // meanings left-aligned out of it, which is how every manual of the
-        // period set a control table.
-        let gutter = cx + 2;
+        // Long forms when the frame can seat them, short when it cannot — a
+        // clipped table teaches nothing. Ordered so the rows a short frame
+        // drops are the ones a player can live without.
+        let rows: [(&str, &str); 7] = if self.layout.w >= 150 {
+            [
+                ("WASD  ARROWS  HJKL", "MOVE AND STEER"),
+                ("X  UP", "ROTATE"),
+                ("SPACE", "HARD DROP"),
+                ("ESC", "LEAVE, AGAIN TO QUIT"),
+                ("C", "HOLD"),
+                ("Z", "ROTATE BACK"),
+                ("P", "PAUSE"),
+            ]
+        } else {
+            [
+                ("WASD", "STEER"),
+                ("X  UP", "ROTATE"),
+                ("SPACE", "DROP"),
+                ("ESC", "LEAVE"),
+                ("C", "HOLD"),
+                ("Z", "UNROTATE"),
+                ("P", "PAUSE"),
+            ]
+        };
+        // Two columns on one gutter: keys right-aligned into it, meanings
+        // left-aligned out of it, which is how every manual of the period set
+        // a control table. The table is measured and centred as a whole
+        // rather than hung off the frame's midline, because its two halves
+        // are nowhere near the same width — and it keeps only the rows that
+        // fit above the ticker.
+        let wk = rows.iter().map(|(k, _)| text_w(k, 1)).max().unwrap_or(0);
+        let ww = rows.iter().map(|(_, w)| text_w(w, 1)).max().unwrap_or(0);
+        let gutter = (self.layout.w as i32 - (wk + 8 + ww)) / 2 + wk + 4;
         let mut y = title_cy + th / 2 + 5;
-        for (key, what) in rows {
+        let floor = self.layout.ticker_sub.unwrap_or(2 * self.layout.h - 6) as i32;
+        let n = (((floor - y - 2) / 8).max(3) as usize).min(rows.len());
+        for (key, what) in rows.iter().take(n) {
             text(&mut self.buf, key, gutter - 4 - text_w(key, 1), y, 1, c(YELLOW), 0.3);
             text(&mut self.buf, what, gutter + 4, y, 1, c(STEEL), 0.0);
             y += 8;
         }
-        text_center(
-            &mut self.buf,
-            kind.hint(),
-            cx,
-            y + 6,
-            1,
-            c(CYAN),
-            0.4,
-        );
+        let _ = (cx, kind);
         self.close(tick);
     }
 
