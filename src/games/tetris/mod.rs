@@ -1,35 +1,33 @@
-//! Tetris core: a pure-logic tetromino well with a millisecond clock. No
-//! rendering, no terminal — a caller drives [`Tetris::step`] with an [`Input`]
-//! and a `dt`, then reads the board through the accessors a renderer needs.
+//! BLOCKS — a Guideline-shaped tetromino well on a millisecond clock: 7-bag,
+//! hold, three of lookahead, SRS kicks, T-spins and all-spins, back-to-back
+//! and combo. The rules live in [`rules`], the awards in [`scoring`], and the
+//! DAS/lock state machine in [`handling`]; this module is the game that plays
+//! them and draws itself onto the canvas.
 //!
-//! This is the clean re-express of the original `blocks.rs`, split into a rules
-//! layer ([`rules`]), a scoring layer ([`scoring`]) and an input/lock state
-//! machine ([`handling`]), all keyed on the [`Mino`] enum the Diorama
-//! compositor already knows how to paint. The clock is the change that unlocks
-//! everything: gravity accumulates in fractional rows (G-units) against real
-//! elapsed time, so DAS/ARR/soft-drop/lock are all genuine milliseconds rather
-//! than quantised 50 ms ticks.
+//! The clock matters: gravity accumulates in fractional rows against real
+//! elapsed time, so DAS, auto-repeat, soft drop and the lock delay are all
+//! genuine milliseconds rather than quantised ticks.
 
 pub mod handling;
-pub mod paint;
 pub mod rules;
 pub mod scoring;
 pub mod skin;
 
 use std::time::Duration;
 
-use crate::games::{Game, Input, Kick, Kind, Pop};
+use crate::games::{Game, Input, Kind};
 use crate::rng::Rng;
-use crate::world::layout::Layout;
-use crate::world::{Buf, Sparks};
+use crate::screen::{self, Screen};
 
 use handling::Handling;
 use rules::{Board, Piece, BUFFER, COLS, ROWS, VISIBLE};
 use scoring::{Action, Award};
 pub use skin::Mino;
 
-/// Pieces of lookahead the renderer draws.
-const NEXT_SHOWN: usize = 5;
+/// Pieces of lookahead the panel shows. Two is enough to place the current
+/// one, three is enough to plan a well — and three is what the panel has room
+/// for.
+const NEXT_SHOWN: usize = 3;
 
 /// Lines cleared per level, and the wall-clock alternative — sitting on a tidy
 /// board must not be a way to stay slow.
@@ -38,15 +36,13 @@ const LEVEL_TIME_SECS: u64 = 25;
 
 /// The gravity curve, as a geometric fall from an opening pace to a floor.
 ///
-/// The Guideline curve was the wrong shape for this. It is built for a marathon
-/// — gentle for a long time, then unplayable — and this is two minutes while a
-/// build runs. It opened too slowly to be interesting and arrived at a wall
-/// with nothing in between.
-///
-/// This one opens brisk enough to be a game from the first piece, gives up a
-/// fixed share of what is left every level so the early steps are felt and the
-/// late ones are not, and settles somewhere a person can keep playing. Dying is
-/// then something the player did rather than something the clock did.
+/// The Guideline curve was the wrong shape for this. It is built for a
+/// marathon — gentle for a long time, then unplayable — and this is two
+/// minutes while a build runs. This one opens brisk enough to be a game from
+/// the first piece, gives up a fixed share of what is left every level so the
+/// early steps are felt and the late ones are not, and settles somewhere a
+/// person can keep playing. Dying is then something the player did rather
+/// than something the clock did.
 const FALL_OPEN: f32 = 0.30;
 const FALL_REST: f32 = 0.10;
 const FALL_DECAY: f32 = 0.72;
@@ -55,8 +51,11 @@ const FALL_DECAY: f32 = 0.72;
 /// into view. The buffer above the visible field is what makes this legal.
 const SPAWN_Y: i32 = BUFFER as i32 - 2;
 
-/// How long cleared rows sit lit before the stack collapses into the gap.
-const CLEAR_DELAY: Duration = Duration::from_millis(200);
+/// How long cleared rows sit lit before the stack collapses into the gap —
+/// plus a share per extra line, so a tetris holds the screen longer than a
+/// single.
+const CLEAR_DELAY: Duration = Duration::from_millis(180);
+const CLEAR_PER_LINE: Duration = Duration::from_millis(60);
 
 /// A cell of soft drop pays one point, a cell of hard drop two.
 const SOFT_DROP_POINTS: u32 = 1;
@@ -65,49 +64,31 @@ const HARD_DROP_POINTS: u32 = 2;
 /// Heat decays to nothing over this long; a hard drop nudges it, a clear or a
 /// spin shoves it.
 const HEAT_DECAY_SECS: f32 = 2.5;
-/// Shake settles far faster — it is a recoil, not a mood.
-const SHAKE_DECAY_SECS: f32 = 0.30;
+
 /// Render frames the machine freezes for. A lock that clears nothing is worth
-/// nothing; a Tetris and a top-out are worth the 150 ms an impact wants before
+/// nothing; a tetris and a top-out are worth the 150 ms an impact wants before
 /// the eye stops reading it as one.
 const HITSTOP_CLEAR: u32 = 4;
 const HITSTOP_BIG: u32 = 8;
 const HITSTOP_OVER: u32 = 10;
 
 /// How long a `+N` marker stays in the air.
-const POP_SECS: f32 = 0.8;
+const POP_SECS: f32 = 0.45;
 
-/// How long a sideways move takes to catch up with itself on screen. Short
-/// enough that it never lags the input, long enough that the piece is seen to
-/// travel rather than to teleport — which is the whole difference between a
-/// game that feels responsive and one that feels like a spreadsheet.
-const SHIFT_GLIDE: f32 = 0.055;
+/// How long the death curtain takes to fill the well from the floor up — the
+/// classic cabinet game-over, and the beat that separates the crash from the
+/// score screen.
+const DEATH_SECS: f32 = 0.6;
 
-/// The wake a hard drop leaves: the piece, where its cells were at the top of
-/// the fall, how many rows it crossed, and how much of its life is left.
-#[derive(Clone, Copy, Debug)]
-pub struct Trail {
-    pub mino: Mino,
-    pub cells: [(i32, i32); 4],
-    pub rows: i32,
-    pub life: f32,
+/// A `+N` rising from the lock that earned it.
+struct Pop {
+    x: i32,
+    y: i32,
+    points: u32,
+    age: f32,
 }
 
-/// How long the stack takes to fall into a cleared gap, and how long a hard
-/// drop's trail hangs in the air behind it.
-const COLLAPSE_SECS: f32 = 0.11;
-const TRAIL_SECS: f32 = 0.16;
-
-/// How long a piece stays compressed after it lands, and how long the queue
-/// takes to slide up after one is taken off the front.
-const SQUASH_SECS: f32 = 0.10;
-const QUEUE_SLIDE_SECS: f32 = 0.09;
-
-/// How long a praise banner stays up. Long enough to read mid-drop, short
-/// enough that it is gone before the next lock wants the same space.
-const PRAISE_SECS: f32 = 1.4;
-
-pub struct Tetris {
+pub struct Blocks {
     board: Board,
     piece: Piece,
     /// The pieces on deck, always [`NEXT_SHOWN`] long.
@@ -120,50 +101,29 @@ pub struct Tetris {
     /// The offset the last rotation used, set only while the last thing that
     /// moved the piece was a rotation — the last-move rule for spins.
     spun: Option<usize>,
-    /// Fractional rows of gravity accumulated but not yet applied. Doubles as
-    /// the piece's sub-row position on screen: a piece a third of the way to
-    /// the next row is drawn a third of the way there.
+    /// Fractional rows of gravity accumulated but not yet applied.
     fall_accum: f32,
-    /// Cells the piece is still visually behind its own column, decaying to
-    /// zero. Negative means it is catching up from the left.
-    glide_x: f32,
-    /// Rows collapsing into a cleared gap, `0.0..=1.0`, and the rows that are
-    /// going. Held after the logical collapse so the stack is seen to fall.
-    collapse: f32,
-    collapsed: Vec<usize>,
-    /// The streak a hard drop left behind it.
-    trail: Option<Trail>,
-    /// The landing still being absorbed: `1.0` the moment a piece locks,
-    /// decaying to nothing. The row it landed on is squashed by it.
-    squash: f32,
-    /// The queue still sliding up after a piece was taken off the front.
-    queue_slide: f32,
-    /// Debris in the air. Rows that clear come apart rather than vanishing.
-    pub(crate) sparks: Sparks,
     score: u32,
     lines: u32,
     /// Consecutive line-clearing pieces; a clean lock breaks it.
     combo: u32,
     back_to_back: bool,
     elapsed: Duration,
+    ticks: f32,
     heat: f32,
-    shake: f32,
     /// Matrix rows lit mid-clear; while any are present there is no live piece.
     clearing: Vec<usize>,
     clear_timer: Duration,
     last_action: Action,
-    /// The last thing worth shouting about and how much of its life is left,
-    /// 1.0 down to 0.0 — the banner under the arena.
-    shout: Option<(String, f32)>,
     pops: Vec<Pop>,
-    /// Impact banked for the shell, drained once a frame.
-    punch: f32,
     hitstop: u32,
-    kick: Option<Kick>,
+    flash_out: f32,
     over: bool,
+    /// Seconds into the death curtain once dead.
+    dying: f32,
 }
 
-impl Tetris {
+impl Blocks {
     pub fn new() -> Self {
         Self::with_rng(Rng::new())
     }
@@ -180,29 +140,21 @@ impl Tetris {
             handling: Handling::new(SPAWN_Y),
             spun: None,
             fall_accum: 0.0,
-            glide_x: 0.0,
-            collapse: 0.0,
-            collapsed: Vec::new(),
-            trail: None,
-            squash: 0.0,
-            queue_slide: 0.0,
-            sparks: Sparks::new(),
             score: 0,
             lines: 0,
             combo: 0,
             back_to_back: false,
             elapsed: Duration::ZERO,
+            ticks: 0.0,
             heat: 0.0,
-            shake: 0.0,
             clearing: Vec::new(),
             clear_timer: Duration::ZERO,
             last_action: Action::Nothing,
-            shout: None,
             pops: Vec::new(),
-            punch: 0.0,
             hitstop: 0,
-            kick: None,
+            flash_out: 0.0,
             over: false,
+            dying: 0.0,
         };
         game.refill();
         game.spawn();
@@ -261,9 +213,6 @@ impl Tetris {
     /// Bring on the head of the queue; false means the well is full.
     fn spawn(&mut self) -> bool {
         let kind = self.queue.remove(0);
-        // The queue starts a slot low and slides up into the gap, so the
-        // preview reads as a conveyor rather than as a list being rewritten.
-        self.queue_slide = 1.0;
         self.refill();
         self.place(kind)
     }
@@ -289,8 +238,7 @@ impl Tetris {
         1 + by_lines.max(by_time)
     }
 
-    /// Seconds a piece takes to fall one row under gravity, on the Guideline
-    /// curve offset to open at level 4.
+    /// Seconds a piece takes to fall one row under gravity.
     pub fn fall_seconds(&self) -> f32 {
         let steps = (self.level() - 1).min(40) as i32;
         FALL_REST + (FALL_OPEN - FALL_REST) * FALL_DECAY.powi(steps)
@@ -299,47 +247,23 @@ impl Tetris {
     // ------------------------------------------------------------ the clock
 
     /// Advance the game by `dt`, applying `input`. Held directions auto-shift,
-    /// gravity accumulates in fractional rows, and a grounded piece locks after
-    /// its window. Rotations, hold and hard drop are edges.
+    /// gravity accumulates in fractional rows, and a grounded piece locks
+    /// after its window. Rotations, hold and hard drop are edges.
     fn advance(&mut self, input: &Input, dt: Duration) {
+        let dts = dt.as_secs_f32();
+        self.ticks += dts;
+        self.heat = (self.heat - dts / HEAT_DECAY_SECS).max(0.0);
+        for p in &mut self.pops {
+            p.age += dts;
+        }
+        self.pops.retain(|p| p.age < POP_SECS);
         if self.over {
+            self.dying += dts;
             return;
         }
         self.elapsed = self.elapsed.saturating_add(dt);
-        let dts = dt.as_secs_f32();
-        self.heat = (self.heat - dts / HEAT_DECAY_SECS).max(0.0);
-        self.shake = (self.shake - dts / SHAKE_DECAY_SECS).max(0.0);
-        if let Some((_, life)) = &mut self.shout {
-            *life -= dts / PRAISE_SECS;
-            if *life <= 0.0 {
-                self.shout = None;
-            }
-        }
-        for p in &mut self.pops {
-            p.life -= dts / POP_SECS;
-        }
-        self.pops.retain(|p| p.life > 0.0);
-        // The piece catches up with its own column, the stack falls into the
-        // gap, and a hard drop's streak fades. None of these are the game — the
-        // game already happened — they are the game being seen.
-        self.glide_x -= self.glide_x.signum() * (dts / SHIFT_GLIDE).min(self.glide_x.abs());
-        if self.collapse > 0.0 {
-            self.collapse = (self.collapse - dts / COLLAPSE_SECS).max(0.0);
-            if self.collapse == 0.0 {
-                self.collapsed.clear();
-            }
-        }
-        if let Some(t) = &mut self.trail {
-            t.life -= dts / TRAIL_SECS;
-            if t.life <= 0.0 {
-                self.trail = None;
-            }
-        }
-        self.squash = (self.squash - dts / SQUASH_SECS).max(0.0);
-        self.queue_slide = (self.queue_slide - dts / QUEUE_SLIDE_SECS).max(0.0);
-        self.sparks.step(dts);
 
-        // A clear freezes the world for its window, then collapses and reloads.
+        // A clear freezes the well for its window, then collapses and reloads.
         if !self.clearing.is_empty() {
             self.clear_timer = self.clear_timer.saturating_sub(dt);
             if self.clear_timer.is_zero() {
@@ -355,35 +279,21 @@ impl Tetris {
             self.try_rotate(false);
         }
         if input.hold && !self.swap_hold() {
-            self.over = true;
+            self.die();
             return;
         }
         if input.hard {
             self.heat = (self.heat + 0.1).min(1.0);
-            let from = self.piece.y;
-            let kind = self.piece.kind;
-            let cells = self.piece.cells();
             while self.step_down() {
                 self.score += HARD_DROP_POINTS;
-            }
-            // The streak is drawn from where the piece was to where it is, so a
-            // drop across the whole well reads as a drop rather than as the
-            // piece having always been at the bottom.
-            let rows = self.piece.y - from;
-            if rows > 0 {
-                self.trail = Some(Trail {
-                    mino: kind,
-                    cells,
-                    rows,
-                    life: 1.0,
-                });
             }
             self.lock();
             return;
         }
 
-        // Horizontal auto-shift: the handling machine says how many single-cell
-        // shifts are owed this step; apply them until a wall stops us.
+        // Horizontal auto-shift: the handling machine says how many
+        // single-cell shifts are owed this step; apply them until a wall
+        // stops us.
         let dir = match (input.left, input.right) {
             (true, false) => -1,
             (false, true) => 1,
@@ -467,9 +377,6 @@ impl Tetris {
             .fits(self.piece.kind, self.piece.rot, self.piece.x + dx, self.piece.y)
         {
             self.piece.x += dx;
-            // The screen starts a cell behind and catches up. Capped at one
-            // cell so a wall charge does not smear.
-            self.glide_x = (self.glide_x - dx as f32).clamp(-1.0, 1.0);
             self.spun = None;
             let grounded = self.grounded();
             self.handling.touch(grounded);
@@ -492,9 +399,7 @@ impl Tetris {
     /// Stamp the piece into the board, score the lock as one [`Action`], and
     /// either begin a line-clear or bring on the next piece.
     fn lock(&mut self) {
-        self.glide_x = 0.0;
         self.fall_accum = 0.0;
-        self.squash = 1.0;
         let spin = rules::classify(&self.board, &self.piece, self.spun);
         let kind = self.piece.kind;
         let cells = self.piece.cells();
@@ -526,74 +431,34 @@ impl Tetris {
             let (sx, sy) = cells
                 .iter()
                 .fold((0i32, 0i32), |(ax, ay), &(cx, cy)| (ax + cx, ay + cy));
+            let col = sx / cells.len() as i32;
+            let row = (sy / cells.len() as i32 - BUFFER as i32).max(0);
             self.pops.push(Pop {
-                col: sx as f32 / cells.len() as f32,
-                row: (sy as f32 / cells.len() as f32) - BUFFER as f32,
+                x: WELL_X + col * 2,
+                y: WELL_Y + row * 2,
                 points,
-                life: 1.0,
+                age: 0.0,
             });
         }
         if cleared {
             let huge = rows.len() >= 4 || perfect;
             self.hitstop = self.hitstop.max(if huge { HITSTOP_BIG } else { HITSTOP_CLEAR });
-            // A spin that cleared is worth as much noise as a triple: it is the
-            // hardest thing in the game to set up and the easiest to miss.
+            // The flash is the machine's loud channel, and it is saved for the
+            // moments that earn it: a tetris or a perfect clear blows the tube
+            // out, a cleared spin most of the way — it is the hardest thing in
+            // the game to set up and the easiest to miss — a triple noticeably,
+            // and the everyday clears not at all.
             let spun = !matches!(action, Action::LineClear(_));
-            self.kick = Some(match () {
-                _ if huge => Kick::Huge,
-                _ if rows.len() >= 3 || spun => Kick::Big,
-                _ => Kick::Small,
+            self.flash_out = self.flash_out.max(match () {
+                _ if huge => 1.0,
+                _ if spun => 0.6,
+                _ if rows.len() == 3 => 0.4,
+                _ => 0.0,
             });
         }
         self.back_to_back = back_to_back;
         self.last_action = action;
-        self.bump(action, perfect);
-
-        if !cleared {
-            if lock_out || !self.spawn() {
-                self.over = true;
-                self.punch = 1.0;
-                self.hitstop = self.hitstop.max(HITSTOP_OVER);
-                self.kick = Some(Kick::Death);
-            }
-            return;
-        }
-        self.clearing = rows;
-        self.clear_timer = CLEAR_DELAY;
-    }
-
-    fn finish_clear(&mut self) {
-        let rows = std::mem::take(&mut self.clearing);
-        // The rows do not vanish, they open outward. A row that disappears was
-        // never there; a row that blows across the well was something you did.
-        for &row in &rows {
-            if row >= BUFFER {
-                let hue = self.board.cells[row][COLS / 2]
-                    .map(|m| m.color())
-                    .unwrap_or_else(|| crate::world::hex(0xFFFFFF));
-                self.sparks.shear(
-                    &mut self.rng,
-                    (row - BUFFER) as f32,
-                    COLS,
-                    18.0 + 6.0 * rows.len() as f32,
-                    hue.lerp(crate::world::hex(0xFFFFFF), 0.55),
-                );
-            }
-        }
-        // The board collapses now and the picture catches up over the next
-        // hundred milliseconds, which is why the rows that went are kept.
-        self.collapsed = rows.clone();
-        self.collapse = 1.0;
-        self.board.collapse(&rows);
-        self.lines += rows.len() as u32;
-        if !self.spawn() {
-            self.over = true;
-        }
-    }
-
-    /// Raise heat and shake for what just happened. Heat carries the felt
-    /// momentum, shake the impact; a single-line clear gets no shake at all.
-    fn bump(&mut self, action: Action, perfect: bool) {
+        let combo_heat = 0.05 * self.combo as f32;
         let base = match action {
             Action::Nothing => 0.0,
             Action::LineClear(4) => 0.6,
@@ -601,85 +466,40 @@ impl Tetris {
             Action::TSpin { lines, .. } => 0.45 + 0.12 * lines as f32,
             Action::AllSpin(lines) => 0.40 + 0.12 * lines as f32,
         };
-        let combo = 0.05 * self.combo as f32;
-        let pc = if perfect { 0.5 } else { 0.0 };
-        self.heat = (self.heat + base + combo + pc).min(1.0);
+        self.heat = (self.heat + base + combo_heat + if perfect { 0.5 } else { 0.0 }).min(1.0);
 
-        let shake = if perfect {
-            3.0
-        } else {
-            match action {
-                Action::LineClear(4) => 2.0,
-                Action::TSpin { lines, .. } if lines > 0 => 1.5,
-                Action::LineClear(2) | Action::LineClear(3) => 1.0,
-                Action::AllSpin(lines) if lines > 0 => 1.0,
-                _ => 0.0,
+        if !cleared {
+            if lock_out || !self.spawn() {
+                self.die();
             }
-        };
-        self.shake = self.shake.max(shake);
-        // The background gets the same news the screen shake does, scaled the
-        // same way — a Tetris should visibly hit harder than a single.
-        self.punch = self.punch.max((base + pc + 0.5 * shake / 3.0).min(1.0));
+            return;
+        }
+        self.clearing = rows;
+        self.clear_timer = CLEAR_DELAY + CLEAR_PER_LINE * (self.clearing.len() as u32 - 1);
+    }
 
-        if let Some(text) = Self::say(action, perfect, self.combo, self.back_to_back) {
-            self.shout = Some((text, 1.0));
+    fn finish_clear(&mut self) {
+        let rows = std::mem::take(&mut self.clearing);
+        self.board.collapse(&rows);
+        self.lines += rows.len() as u32;
+        if !self.spawn() {
+            self.die();
         }
     }
 
-    /// What the banner says for a lock, or `None` when it was unremarkable. A
-    /// combo alone is worth shouting about, which is why it can produce a
-    /// banner on a single that otherwise would not.
-    fn say(action: Action, perfect: bool, combo: u32, b2b: bool) -> Option<String> {
-        if perfect {
-            return Some("PERFECT CLEAR".into());
+    fn die(&mut self) {
+        if self.over {
+            return;
         }
-        let base = match action {
-            Action::Nothing => None,
-            Action::TSpin { lines: 0, .. } => Some("T-SPIN".into()),
-            Action::TSpin { lines, mini } => Some(format!(
-                "T-SPIN {}{}",
-                if mini { "MINI " } else { "" },
-                Self::count(lines)
-            )),
-            Action::AllSpin(0) => None,
-            Action::AllSpin(lines) => Some(format!("SPIN {}", Self::count(lines))),
-            Action::LineClear(4) => Some("TETRIS".into()),
-            Action::LineClear(n) if n >= 2 => Some(Self::count(n).into()),
-            Action::LineClear(_) => None,
-        };
-        let base = match (base, combo) {
-            (Some(b), _) => b,
-            // A run of singles is the one case where nothing else has fired.
-            (None, c) if c >= 2 => String::new(),
-            (None, _) => return None,
-        };
-        let mut out = String::new();
-        if b2b && !base.is_empty() {
-            out.push_str("B2B ");
-        }
-        out.push_str(&base);
-        if combo >= 2 {
-            if !out.is_empty() {
-                out.push(' ');
-            }
-            out.push_str(&format!("{combo}X COMBO"));
-        }
-        Some(out)
-    }
-
-    fn count(lines: u32) -> &'static str {
-        match lines {
-            1 => "SINGLE",
-            2 => "DOUBLE",
-            3 => "TRIPLE",
-            _ => "QUAD",
-        }
+        self.over = true;
+        self.dying = 0.0;
+        self.hitstop = self.hitstop.max(HITSTOP_OVER);
     }
 
     // ------------------------------------------------------ renderer readouts
 
-    /// The visible 20×10 field as settled colours; the live piece is not merged
-    /// in (see [`Tetris::active`]).
+    /// The visible 20×10 field as settled cells; the live piece is not merged
+    /// in (see [`Blocks::active`]).
     pub fn cells(&self) -> [[Option<Mino>; COLS]; VISIBLE] {
         let mut out = [[None; COLS]; VISIBLE];
         for (r, row) in out.iter_mut().enumerate() {
@@ -689,8 +509,8 @@ impl Tetris {
     }
 
     /// The live piece kind and its cells in visible coordinates (column, row),
-    /// where a negative row is still above the field, raining in. `None` during
-    /// a clear or after game over.
+    /// where a negative row is still above the field, raining in. `None`
+    /// during a clear or after game over.
     pub fn active(&self) -> Option<(Mino, [(i32, i32); 4])> {
         if self.over || !self.clearing.is_empty() {
             return None;
@@ -723,10 +543,6 @@ impl Tetris {
         &self.queue
     }
 
-    pub fn score(&self) -> u32 {
-        self.score
-    }
-
     pub fn lines(&self) -> u32 {
         self.lines
     }
@@ -739,15 +555,8 @@ impl Tetris {
         self.back_to_back
     }
 
-    /// How hot the player is, 0.0..=1.0 — rising on clears, drops, spins and
-    /// combos, decaying over ~2.5 s.
-    pub fn heat(&self) -> f32 {
-        self.heat.clamp(0.0, 1.0)
-    }
-
-    /// Current screen-shake amount in whole cells.
-    pub fn shake(&self) -> i32 {
-        self.shake.round() as i32
+    pub fn last_action(&self) -> Action {
+        self.last_action
     }
 
     /// Visible rows currently lit mid-clear.
@@ -758,96 +567,150 @@ impl Tetris {
             .map(|&row| row - BUFFER)
             .collect()
     }
+}
 
-    /// Fraction of the lock window elapsed for a grounded piece, for a
-    /// grounded-piece ghost pulse; zero when airborne.
-    /// How far the live piece has fallen past its logical row, `0.0..1.0`, and
-    /// how far it still is from its own column. The painter offsets by both, so
-    /// a piece slides rather than steps.
-    pub fn drift(&self) -> (f32, f32) {
-        if self.grounded() {
-            // A grounded piece sits exactly on its cell: it is about to be part
-            // of the stack, and a stack that floats reads as a bug.
-            (self.glide_x, 0.0)
-        } else {
-            (self.glide_x, self.fall_accum.clamp(0.0, 1.0))
-        }
-    }
+// ------------------------------------------------------------------ drawing
 
-    /// Throw a row's worth of debris, for a still that has to show what a clear
-    /// looks like without waiting for one to happen.
-    pub fn debris(&mut self, row: usize) {
-        let hue = crate::world::hex(0x00F0FF);
-        self.sparks
-            .shear(&mut self.rng, row as f32, COLS, 20.0, hue);
-    }
+/// The well: 10×20 cells of 2×2 pixels inside a 1px border, on the left of
+/// the canvas. Row 0 is the shell's wrap rule.
+const WELL_X: i32 = 1;
+const WELL_Y: i32 = 2;
 
-    /// How close the stack is to the top, `0.0..=1.0`. Nothing on screen says
-    /// this in words; the frame runs hotter and the lights run faster, which is
-    /// a thing you feel a piece or two before you would have counted it.
-    pub fn danger(&self) -> f32 {
+/// The two panel columns to the right of the well, each a label with its
+/// contents under it, so the eye only ever tracks two verticals.
+const HOLD_X: i32 = 28;
+const NEXT_X: i32 = 56;
+/// Top of the first preview under either label, and the pitch between queued
+/// pieces.
+const PREVIEW_Y: i32 = 10;
+const PREVIEW_STEP: i32 = 9;
+/// Baselines of the readouts under the hold slot, and of the combo badge
+/// under the queue.
+const LEVEL_Y: i32 = 24;
+const LINES_Y: i32 = 32;
+const COMBO_Y: i32 = 24;
+/// The strip under the well: score at the left, back-to-back at the right.
+const STRIP_Y: i32 = 43;
+
+impl Blocks {
+    fn paint(&self, s: &mut Screen) {
+        s.rect(WELL_X - 1, WELL_Y - 1, COLS as u32 * 2 + 2, VISIBLE as u32 * 2 + 2);
+
+        // The settled stack, solid. A texture was tried here — a knocked-out
+        // corner per cell — and at two pixels a cell it reads as static, not
+        // masonry. At this scale a cell is either there or it is not.
         let cells = self.cells();
-        let top = (0..VISIBLE)
-            .find(|&r| cells[r].iter().any(|c| c.is_some()))
-            .unwrap_or(VISIBLE);
-        // The top quarter of the well is where it starts to matter.
-        let depth = VISIBLE as f32 / 4.0;
-        ((depth - top as f32) / depth).clamp(0.0, 1.0)
-    }
-
-    /// How hard the last landing is still being felt, `0.0..=1.0`. The row a
-    /// piece came to rest on is drawn compressed by it, so a lock lands rather
-    /// than simply appearing.
-    pub fn squash(&self) -> f32 {
-        self.squash
-    }
-
-    /// How far the queue still has to slide after a piece came off the front.
-    pub fn queue_slide(&self) -> f32 {
-        self.queue_slide
-    }
-
-    /// The stack falling into a cleared gap: how far it still has to go, and
-    /// which rows went. A block above `n` of those rows is drawn `n * phase`
-    /// rows higher than it now logically is.
-    pub fn collapsing(&self) -> (f32, &[usize]) {
-        (self.collapse, &self.collapsed)
-    }
-
-    pub fn trail(&self) -> Option<Trail> {
-        self.trail
-    }
-
-    pub fn lock_phase(&self) -> f32 {
-        if self.grounded() {
-            self.handling.lock_phase()
-        } else {
-            0.0
+        for (row, line) in cells.iter().enumerate() {
+            for (col, cell) in line.iter().enumerate() {
+                if cell.is_some() {
+                    let (x, y) = well_px(col as i32, row as i32);
+                    s.fill_rect(x, y, 2, 2, true);
+                }
+            }
         }
-    }
 
-    pub fn last_action(&self) -> Action {
-        self.last_action
-    }
+        // Rows mid-clear blink solid/hollow as their window runs down.
+        let blink = ((self.clear_timer.as_secs_f32() / 0.07) as u32).is_multiple_of(2);
+        for row in self.clearing_rows() {
+            let (x, y) = well_px(0, row as i32);
+            s.fill_rect(x, y, COLS as u32 * 2, 2, blink);
+        }
 
-    pub fn is_over(&self) -> bool {
-        self.over
+        // The ghost as one pixel per cell: present enough to aim by, faint
+        // enough that it can never be mistaken for the piece.
+        if let Some(ghost) = self.ghost() {
+            for (col, row) in ghost {
+                if row >= 0 {
+                    let (x, y) = well_px(col, row);
+                    s.set(x, y, true);
+                }
+            }
+        }
+
+        // The live piece, solid — the one thing on the field with no texture,
+        // which is what makes it the live one.
+        if let Some((_, active)) = self.active() {
+            for (col, row) in active {
+                if row >= 0 {
+                    let (x, y) = well_px(col, row);
+                    s.fill_rect(x, y, 2, 2, true);
+                }
+            }
+        }
+
+        // The death curtain: the well fills from the floor up, the way a
+        // cabinet said game over before it had words for it.
+        if self.over {
+            let rows = ((self.dying / DEATH_SECS) * VISIBLE as f32) as i32;
+            for row in (VISIBLE as i32 - rows).max(0)..VISIBLE as i32 {
+                let (x, y) = well_px(0, row);
+                s.fill_rect(x, y, COLS as u32 * 2, 2, true);
+            }
+        }
+
+        // The two panels.
+        s.text(HOLD_X, 2, "HOLD");
+        if let Some(kind) = self.hold {
+            // Hollow while spent: the slot shows what it holds and whether it
+            // can be asked for it.
+            piece_sprite(s, HOLD_X, PREVIEW_Y, kind, self.hold_ready());
+        }
+        s.text(HOLD_X, LEVEL_Y, &format!("LV {}", self.level()));
+        s.text(HOLD_X, LINES_Y, &format!("LN {}", self.lines));
+
+        s.text(NEXT_X, 2, "NEXT");
+        for (i, &kind) in self.queue.iter().take(NEXT_SHOWN).enumerate() {
+            piece_sprite(s, NEXT_X, PREVIEW_Y + i as i32 * PREVIEW_STEP, kind, true);
+        }
+        if self.combo >= 2 {
+            s.text(HOLD_X, COMBO_Y - 8, &format!("X{}", self.combo));
+        }
+
+        // The strip: score on the left, the back-to-back flag on the right,
+        // one baseline so the bottom edge reads as a single line.
+        s.text(WELL_X, STRIP_Y, &self.score.to_string());
+        if self.back_to_back {
+            s.text(screen::W as i32 - screen::text_width("B2B") - 1, STRIP_Y, "B2B");
+        }
+
+        // Markers last, so they stay legible over whatever fired them.
+        for p in &self.pops {
+            let label = format!("+{}", p.points);
+            let w = screen::text_width(&label);
+            let x = (p.x - w / 2).clamp(1, screen::W as i32 - w - 1);
+            let y = (p.y - (p.age / 0.06) as i32).max(1);
+            s.text(x, y, &label);
+        }
     }
 }
 
-impl Default for Tetris {
+/// Pixel corner of well cell (col, row).
+fn well_px(col: i32, row: i32) -> (i32, i32) {
+    (WELL_X + col * 2, WELL_Y + row * 2)
+}
+
+/// A piece in a panel at 2×2 px a cell; hollow when it is not available.
+fn piece_sprite(s: &mut Screen, x: i32, y: i32, kind: Mino, solid: bool) {
+    for (cx, cy) in rules::cells(kind, 0) {
+        let (px, py) = (x + cx as i32 * 2, y + cy as i32 * 2);
+        if solid {
+            s.fill_rect(px, py, 2, 2, true);
+        } else {
+            s.set(px, py, true);
+            s.set(px + 1, py + 1, true);
+        }
+    }
+}
+
+impl Default for Blocks {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Game for Tetris {
+impl Game for Blocks {
     fn kind(&self) -> Kind {
-        Kind::Tetris
-    }
-
-    fn field(&self) -> (usize, usize) {
-        (COLS, VISIBLE)
+        Kind::Blocks
     }
 
     fn step(&mut self, input: &Input, dt: Duration) {
@@ -855,7 +718,7 @@ impl Game for Tetris {
     }
 
     fn is_over(&self) -> bool {
-        self.over
+        self.over && self.dying >= DEATH_SECS
     }
 
     fn score(&self) -> u32 {
@@ -866,33 +729,17 @@ impl Game for Tetris {
         self.heat.clamp(0.0, 1.0)
     }
 
-    fn shake(&self) -> i32 {
-        self.shake.round() as i32
-    }
-
-    fn take_punch(&mut self) -> f32 {
-        std::mem::take(&mut self.punch)
-    }
-
     fn take_hitstop(&mut self) -> u32 {
         std::mem::take(&mut self.hitstop)
     }
 
-    fn take_kick(&mut self) -> Option<Kick> {
-        self.kick.take()
-    }
-
-    fn tally(&self) -> [(&'static str, u32); 2] {
-        [("LINES", self.lines), ("LEVEL", self.level())]
-    }
-
-    fn pops(&self) -> &[Pop] {
-        &self.pops
+    fn take_flash(&mut self) -> f32 {
+        std::mem::take(&mut self.flash_out)
     }
 
     /// Walk the piece toward the shallowest column and drop it. Not a solver —
     /// it will bury itself eventually — but it stacks flat for long enough to
-    /// look like play, which is all an attract screen owes anyone.
+    /// look like play, which is all a demo owes anyone.
     fn autopilot(&self) -> Input {
         let Some((_, cells)) = self.active() else {
             return Input::default();
@@ -921,12 +768,8 @@ impl Game for Tetris {
         }
     }
 
-    fn shout(&self) -> Option<(&str, f32)> {
-        self.shout.as_ref().map(|(s, life)| (s.as_str(), *life))
-    }
-
-    fn paint(&self, b: &mut Buf, l: &Layout) {
-        paint::paint(b, l, self);
+    fn draw(&self, s: &mut Screen) {
+        self.paint(s);
     }
 }
 
@@ -956,16 +799,26 @@ mod tests {
     }
 
     /// A deterministic game holding a chosen live piece with a known queue.
-    fn rig(kind: Mino, next: Mino) -> Tetris {
-        let mut game = Tetris::with_rng(Rng::from_seed(7));
-        game.queue = vec![next, Mino::O, Mino::T, Mino::S, Mino::Z];
+    fn rig(kind: Mino, next: Mino) -> Blocks {
+        let mut game = Blocks::with_rng(Rng::from_seed(7));
+        game.queue = vec![next, Mino::O, Mino::T];
         game.place(kind);
         game
     }
 
     #[test]
-    fn the_bag_deals_each_piece_once_and_the_queue_shows_five() {
-        let mut game = Tetris::with_rng(Rng::from_seed(42));
+    fn the_well_and_panels_fit_the_canvas() {
+        // The well border, the panel columns and the strip all live inside
+        // 80×48 with the wrap rule's row to spare.
+        assert_eq!(WELL_Y + VISIBLE as i32 * 2, STRIP_Y - 1, "border meets strip");
+        assert!(STRIP_Y + 5 <= screen::H as i32);
+        assert!(NEXT_X + 8 < screen::W as i32);
+        assert!(PREVIEW_Y + (NEXT_SHOWN as i32 - 1) * PREVIEW_STEP + 4 < STRIP_Y);
+    }
+
+    #[test]
+    fn the_bag_deals_each_piece_once_and_the_queue_shows_three() {
+        let mut game = Blocks::with_rng(Rng::from_seed(42));
         assert_eq!(game.next().len(), NEXT_SHOWN);
         let mut seen: Vec<Mino> = vec![game.piece.kind];
         seen.extend(game.queue.iter().copied());
@@ -1027,8 +880,8 @@ mod tests {
             game.score - before >= scoring::LINE_POINTS[0],
             "a single scores its line points"
         );
-        // Sit through the clear window; the row collapses and the O's top half
-        // falls into the gap.
+        // Sit through the clear window; the row collapses and the O's top
+        // half falls into the gap.
         game.step(&none(), CLEAR_DELAY);
         assert_eq!(game.lines, 1);
         assert!(game.clearing.is_empty());
@@ -1040,19 +893,19 @@ mod tests {
     fn a_back_to_back_tetris_pays_half_again_through_the_clock() {
         let mut game = rig(Mino::I, Mino::I);
         // Stage and clear a first tetris off an I stood on its end. Locking by
-        // the lock delay (rather than a hard drop) keeps drop points out of the
-        // score so the awards can be checked exactly.
+        // the lock delay (rather than a hard drop) keeps drop points out of
+        // the score so the awards can be checked exactly.
         stage_tetris(&mut game);
         lock_by_delay(&mut game);
         assert_eq!(game.clearing.len(), 4);
         assert!(game.back_to_back, "the first tetris arms the chain");
         assert_eq!(game.score, 800, "the first tetris is flat rate at level 1");
-        game.step(&none(), CLEAR_DELAY);
+        assert_eq!(game.take_flash(), 1.0, "and it is the loudest thing there is");
+        game.step(&none(), CLEAR_DELAY + CLEAR_PER_LINE * 3);
         assert_eq!(game.lines, 4);
 
-        // A second tetris. Four lines have already been paid for, so the level
-        // has moved on; the point of the assertion is the ×1.5, and it is
-        // written against whatever level the clock and the lines have reached.
+        // A second tetris. Four lines have already been paid for, so the
+        // level has moved on; the point of the assertion is the ×1.5.
         stage_tetris(&mut game);
         let level = game.level();
         let before = game.score;
@@ -1066,9 +919,9 @@ mod tests {
     }
 
     /// Fill the bottom four rows bar the last column and stand an I on end in
-    /// the trench, plus a lone leftover block so clearing the four does not also
-    /// perfect-clear the board.
-    fn stage_tetris(game: &mut Tetris) {
+    /// the trench, plus a lone leftover block so clearing the four does not
+    /// also perfect-clear the board.
+    fn stage_tetris(game: &mut Blocks) {
         game.board = Board::new();
         for row in ROWS - 4..ROWS {
             for col in 0..COLS - 1 {
@@ -1086,7 +939,7 @@ mod tests {
 
     /// Send the live piece to its landing row and hold it there until the lock
     /// delay expires, without any drop scoring.
-    fn lock_by_delay(game: &mut Tetris) {
+    fn lock_by_delay(game: &mut Blocks) {
         game.piece.y = game.piece.ghost_y(&game.board);
         game.step(&none(), handling::LOCK_DELAY);
     }
@@ -1097,7 +950,7 @@ mod tests {
         // grounded move must cost a reset even when the lock timer is cold, or
         // the slide is infinite; the resets are capped, so it still locks.
         let mut game = rig(Mino::O, Mino::T);
-        game.piece.y = (ROWS - 2) as i32; // O resting on the floor, grounded
+        game.piece.y = (ROWS - 2) as i32;
         let mut steps = 0;
         while !game.board.cells[FLOOR].iter().any(|c| c.is_some()) {
             let input = Input {
@@ -1109,7 +962,7 @@ mod tests {
             steps += 1;
             assert!(steps < 300, "the piece never locked — a reset leaked");
         }
-        assert!(steps > handling::LOCK_RESETS, "sliding bought no lock time at all");
+        assert!(steps > handling::LOCK_RESETS as usize, "sliding bought no lock time at all");
     }
 
     #[test]
@@ -1129,14 +982,20 @@ mod tests {
     }
 
     #[test]
-    fn a_block_out_at_spawn_ends_the_game() {
+    fn a_block_out_at_spawn_ends_the_game_through_its_curtain() {
         let mut game = rig(Mino::O, Mino::O);
-        // Block the spawn columns so the next piece cannot appear — but not the
-        // whole row, or it would read as a line to clear instead.
+        // Block the spawn columns so the next piece cannot appear — but not
+        // the whole row, or it would read as a line to clear instead.
         for col in 3..7 {
             game.board.cells[SPAWN_Y as usize][col] = Some(Mino::I);
         }
         game.step(&hard(), ms(16));
+        assert!(game.over, "the well is topped out");
+        assert!(!game.is_over(), "the curtain has to fall first");
+        assert_eq!(game.take_hitstop(), HITSTOP_OVER);
+        for _ in 0..((DEATH_SECS / 0.016) as u32 + 2) {
+            game.step(&none(), ms(16));
+        }
         assert!(game.is_over());
     }
 
@@ -1152,7 +1011,6 @@ mod tests {
         let hot = game.heat();
         assert!(hot > 0.1, "a clear lights it: {hot}");
         assert!((0.0..=1.0).contains(&hot));
-        // Let time pass with nothing happening: it cools.
         game.step(&none(), CLEAR_DELAY);
         for _ in 0..40 {
             game.step(&none(), ms(50));
@@ -1161,12 +1019,22 @@ mod tests {
     }
 
     #[test]
+    fn everyday_clears_stay_quiet_on_the_loud_channel() {
+        let mut game = rig(Mino::O, Mino::T);
+        for col in 0..8 {
+            game.board.cells[FLOOR][col] = Some(Mino::I);
+        }
+        game.piece.x = 8;
+        game.step(&hard(), ms(16));
+        assert_eq!(game.take_flash(), 0.0, "a single must not blow the tube out");
+    }
+
+    #[test]
     fn the_renderer_readouts_stay_consistent() {
         let game = rig(Mino::T, Mino::I);
         assert_eq!(game.next().len(), NEXT_SHOWN);
         let (kind, cells) = game.active().expect("a live piece");
         assert_eq!(kind, Mino::T);
-        // The active cells sit within the visible field or just above it.
         for (col, row) in cells {
             assert!((0..COLS as i32).contains(&col));
             assert!(row < VISIBLE as i32);
@@ -1180,108 +1048,12 @@ mod tests {
 }
 
 #[cfg(test)]
-mod motion {
-    use super::*;
-
-    fn ms(n: u64) -> Duration {
-        Duration::from_millis(n)
-    }
-
-    #[test]
-    fn a_falling_piece_is_drawn_between_rows() {
-        let mut g = Tetris::with_rng(Rng::from_seed(3));
-        // Part of a row's worth of gravity: the piece has not stepped yet, and
-        // the screen has to show that it is on its way.
-        g.advance(&Input::default(), ms(100));
-        let (_, dy) = g.drift();
-        assert!(dy > 0.0 && dy < 1.0, "not between rows: {dy}");
-    }
-
-    #[test]
-    fn a_grounded_piece_sits_exactly_on_its_cell() {
-        let mut g = Tetris::with_rng(Rng::from_seed(4));
-        // Drop it to the floor and let it settle.
-        while g.piece.y < 30 && g.step_down() {}
-        let (_, dy) = g.drift();
-        assert_eq!(dy, 0.0, "a stack that floats reads as a bug");
-    }
-
-    #[test]
-    fn a_sideways_move_starts_behind_and_catches_up() {
-        let mut g = Tetris::with_rng(Rng::from_seed(5));
-        let input = Input {
-            right: true,
-            ..Default::default()
-        };
-        g.advance(&input, ms(16));
-        let (dx, _) = g.drift();
-        assert!(dx < 0.0, "the screen did not lag the move: {dx}");
-        assert!(dx >= -1.0, "and it lagged by more than a cell: {dx}");
-        // And it is gone shortly after, rather than trailing forever.
-        g.advance(&Input::default(), ms(120));
-        assert_eq!(g.drift().0, 0.0);
-    }
-
-    #[test]
-    fn locking_puts_the_piece_back_on_the_grid() {
-        let mut g = Tetris::with_rng(Rng::from_seed(6));
-        g.advance(
-            &Input {
-                right: true,
-                ..Default::default()
-            },
-            ms(16),
-        );
-        g.advance(
-            &Input {
-                hard: true,
-                ..Default::default()
-            },
-            ms(16),
-        );
-        // Whatever the piece was doing on its way down, the stack is square.
-        assert_eq!(g.glide_x, 0.0);
-        assert_eq!(g.fall_accum, 0.0);
-    }
-
-    #[test]
-    fn danger_rises_as_the_stack_does() {
-        let mut g = Tetris::with_rng(Rng::from_seed(9));
-        assert_eq!(g.danger(), 0.0, "an empty well is not dangerous");
-        // Fill from the floor up: nothing until the top quarter, then it climbs.
-        for row in (BUFFER..ROWS).rev() {
-            g.board.cells[row][0] = Some(Mino::I);
-        }
-        assert!(g.danger() > 0.9, "a full well is: {}", g.danger());
-    }
-
-    #[test]
-    fn a_hard_drop_leaves_a_streak_that_fades() {
-        let mut g = Tetris::with_rng(Rng::from_seed(7));
-        g.advance(
-            &Input {
-                hard: true,
-                ..Default::default()
-            },
-            ms(16),
-        );
-        let t = g.trail().expect("a drop across the well leaves one");
-        assert!(t.rows > 5, "the streak covers the fall: {}", t.rows);
-        assert!(t.life > 0.9);
-        for _ in 0..20 {
-            g.advance(&Input::default(), ms(16));
-        }
-        assert!(g.trail().is_none(), "and it does not hang there");
-    }
-}
-
-#[cfg(test)]
 mod balance {
     use super::*;
 
     /// The level at `secs` of play with nothing cleared — the clock alone.
-    fn at(secs: u64) -> Tetris {
-        let mut g = Tetris::with_rng(Rng::from_seed(1));
+    fn at(secs: u64) -> Blocks {
+        let mut g = Blocks::with_rng(Rng::from_seed(1));
         g.elapsed = Duration::from_secs(secs);
         g
     }
@@ -1289,8 +1061,7 @@ mod balance {
     #[test]
     fn the_curve_opens_playable_and_never_runs_away() {
         // Brisk enough to be a game from the first piece, and it settles
-        // somewhere a person can keep playing rather than at a wall. Between
-        // those two the shape is the decay's business.
+        // somewhere a person can keep playing rather than at a wall.
         let open = at(0).fall_seconds();
         assert!(
             (0.25..=0.35).contains(&open),

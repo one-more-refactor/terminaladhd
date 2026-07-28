@@ -1,13 +1,9 @@
-//! Tetris-specific piece identity: the seven-piece order the 7-bag and the
-//! SRS kick tables are indexed by, the conversions between that index and the
-//! [`Mino`] enum, and the neon each piece is painted in.
+//! Piece identity: the seven-piece order the 7-bag and the SRS kick tables
+//! are indexed by, and the conversions between that index and the [`Mino`]
+//! enum. On a one-bit screen the pieces have no colour to own — identity is
+//! shape, which is how the first cabinets told them apart too.
 
-use crate::world::scene::palette::*;
-use crate::world::{hex, Rgb};
-
-/// The seven tetrominoes. Colour and its settled/ghost derivations live on the
-/// enum, so the rules layer and the painter agree on piece identity in one
-/// place.
+/// The seven tetrominoes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mino {
     I,
@@ -19,27 +15,10 @@ pub enum Mino {
     L,
 }
 
-impl Mino {
-    /// The classic cabinet assignment, in the machine's own six hues plus the
-    /// two it keeps for pieces. Each is at full saturation: on a black ground
-    /// there is no such thing as a colour that is too hot.
-    pub fn color(self) -> Rgb {
-        hex(match self {
-            Mino::I => CYAN,
-            Mino::O => YELLOW,
-            Mino::T => VIOLET,
-            Mino::S => GREEN,
-            Mino::Z => RED,
-            Mino::J => BLUE,
-            Mino::L => ORANGE,
-        })
-    }
-}
-
 /// The seven tetrominoes in canonical order. This is the order the 7-bag
-/// shuffles and the order every kick/shape table below is indexed by, so I
-/// is index 0 (the only piece with its own kick table) and the rest follow
-/// the enum's own declaration.
+/// shuffles and the order every kick/shape table is indexed by, so I is index
+/// 0 (the only piece with its own kick table) and the rest follow the enum's
+/// own declaration.
 pub const ORDER: [Mino; 7] = [
     Mino::I,
     Mino::O,
