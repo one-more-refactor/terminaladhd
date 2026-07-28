@@ -222,6 +222,26 @@ impl Snake {
         }
     }
 
+    /// How much farther things are on this arena than on the reference
+    /// 26×14, as a crossing-distance ratio. The streak window and the gold
+    /// clock stretch by it: both are promises about *reachability*, and a
+    /// fixed number of seconds keeps that promise only at one field size —
+    /// on a wide terminal the multiplier was nearly unchainable and the gold
+    /// mostly decoration.
+    fn reach_scale(&self) -> f32 {
+        ((self.cols + self.rows) as f32 / (COLS + ROWS) as f32).max(1.0)
+    }
+
+    /// Seconds the chain stays open on this arena.
+    pub fn streak_window(&self) -> f32 {
+        STREAK_WINDOW * self.reach_scale()
+    }
+
+    /// Seconds a golden apple lives on this arena.
+    pub fn gold_life(&self) -> f32 {
+        GOLD_LIFE * self.reach_scale()
+    }
+
     /// Which speed tier the run has reached, `0..PERIODS.len()`.
     pub fn tier(&self) -> u32 {
         (self.eaten / TIER_SIZE).min(PERIODS.len() as u32 - 1)
@@ -274,7 +294,7 @@ impl Snake {
         if self.mult <= 1 {
             0.0
         } else {
-            (1.0 - self.since_eat / STREAK_WINDOW).clamp(0.0, 1.0)
+            (1.0 - self.since_eat / self.streak_window()).clamp(0.0, 1.0)
         }
     }
 
@@ -398,7 +418,7 @@ impl Snake {
 
     fn eat(&mut self) {
         let gold = self.apple.gold;
-        self.mult = if self.since_eat <= STREAK_WINDOW {
+        self.mult = if self.since_eat <= self.streak_window() {
             (self.mult + 1).min(MAX_MULT)
         } else {
             1
@@ -501,10 +521,11 @@ fn place(rng: &mut Rng, body: &VecDeque<(i32, i32)>, gold: bool, cols: i32, rows
     } else {
         free[rng.range(free.len() as u32) as usize]
     };
+    let scale = ((cols + rows) as f32 / (COLS + ROWS) as f32).max(1.0);
     Apple {
         at,
         gold,
-        ttl: gold.then_some(GOLD_LIFE),
+        ttl: gold.then_some(GOLD_LIFE * scale),
     }
 }
 
@@ -549,7 +570,7 @@ impl Game for Snake {
 
         self.elapsed = self.elapsed.saturating_add(dt);
         self.since_eat += dts;
-        if self.since_eat > STREAK_WINDOW {
+        if self.since_eat > self.streak_window() {
             self.mult = 1;
         }
 
@@ -984,6 +1005,24 @@ mod balance {
         // from the far corner until the snake has earned some speed.
         assert!(typical(0) < GOLD_LIFE, "never worth going for");
         assert!(worst(0) > GOLD_LIFE, "always worth going for");
+    }
+
+    #[test]
+    fn the_chain_and_the_gold_scale_with_the_field() {
+        // The same two promises, kept on a wide arena: the average apple
+        // chains, the far corner does not, and the gold is a decision. At the
+        // fixed windows both promises broke the moment the field grew.
+        let g = Snake::with_field(Rng::from_seed(2), 36, 14);
+        let typical = (36 + 14) as f32 / 3.0 * g.interval();
+        let worst = (36 + 14 - 2) as f32 * g.interval();
+        assert!(typical < g.streak_window(), "the average apple must chain");
+        assert!(worst > g.streak_window(), "the corner must not");
+        assert!(typical < g.gold_life(), "the gold must be worth going for");
+        assert!(worst > g.gold_life(), "and never a gimme");
+        // And the reference field is untouched by the scaling.
+        let r = Snake::with_rng(Rng::from_seed(2));
+        assert_eq!(r.streak_window(), STREAK_WINDOW);
+        assert_eq!(r.gold_life(), GOLD_LIFE);
     }
 
     /// A square arena leaves the player equidistant from everything and the

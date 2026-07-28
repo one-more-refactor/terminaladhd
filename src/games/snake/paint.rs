@@ -108,9 +108,11 @@ fn apple(b: &mut Buf, l: &Layout, g: &Snake, shake: i32, t: f32) {
 
     let (hue, pulse) = match a.ttl {
         // Urgency is carried by the blink rate, not by dimming: a golden apple
-        // must never be hard to see in the moment it is worth the most.
+        // must never be hard to see in the moment it is worth the most. The
+        // rate normalises against this arena's own clock, which stretches
+        // with the field.
         Some(ttl) => {
-            let rate = 6.0 + 18.0 * (1.0 - (ttl / super::GOLD_LIFE).clamp(0.0, 1.0));
+            let rate = 6.0 + 18.0 * (1.0 - (ttl / g.gold_life()).clamp(0.0, 1.0));
             (c(YELLOW), 0.55 + 0.45 * (t * rate).sin())
         }
         None => (c(GREEN), 0.75 + 0.25 * (t * 4.0).sin()),
