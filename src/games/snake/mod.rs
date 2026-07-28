@@ -35,7 +35,7 @@ pub const ROWS: i32 = 14;
 /// Seconds per cell at each speed tier, and the points an apple pays there.
 /// Discrete rather than a smooth curve: a tier the player can feel arriving is
 /// worth more than one that creeps, and it gives the score something to say.
-const PERIODS: [f32; 6] = [0.150, 0.125, 0.108, 0.095, 0.085, 0.075];
+const PERIODS: [f32; 6] = [0.130, 0.112, 0.098, 0.088, 0.079, 0.072];
 const POINTS: [u32; 6] = [3, 4, 5, 7, 9, 12];
 /// Apples per tier. The top tier lands around the fifteenth — about half a
 /// minute in, which is roughly how long anyone waits for a build step.

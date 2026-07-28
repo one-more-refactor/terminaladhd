@@ -34,7 +34,7 @@ const NEXT_SHOWN: usize = 5;
 /// Lines cleared per level, and the wall-clock alternative — sitting on a tidy
 /// board must not be a way to stay slow.
 const LINES_PER_LEVEL: u32 = 5;
-const LEVEL_TIME_SECS: u64 = 25;
+const LEVEL_TIME_SECS: u64 = 20;
 
 /// The gravity curve, as a geometric fall from an opening pace to a floor.
 ///
@@ -47,8 +47,8 @@ const LEVEL_TIME_SECS: u64 = 25;
 /// fixed share of what is left every level so the early steps are felt and the
 /// late ones are not, and settles somewhere a person can keep playing. Dying is
 /// then something the player did rather than something the clock did.
-const FALL_OPEN: f32 = 0.30;
-const FALL_REST: f32 = 0.10;
+const FALL_OPEN: f32 = 0.22;
+const FALL_REST: f32 = 0.085;
 const FALL_DECAY: f32 = 0.72;
 
 /// Spawn the piece two rows above the skyline; one step of gravity brings it
@@ -150,6 +150,8 @@ pub struct Tetris {
     back_to_back: bool,
     /// The last level announced, so a climb is shouted exactly once.
     last_level: u32,
+    /// Whether the piece arriving at lock was hard-dropped there.
+    slammed: bool,
     elapsed: Duration,
     heat: f32,
     shake: f32,
@@ -197,6 +199,7 @@ impl Tetris {
             combo: 0,
             back_to_back: false,
             last_level: 1,
+            slammed: false,
             elapsed: Duration::ZERO,
             heat: 0.0,
             shake: 0.0,
@@ -377,6 +380,7 @@ impl Tetris {
         }
         if input.hard {
             self.heat = (self.heat + 0.1).min(1.0);
+            self.slammed = true;
             let from = self.piece.y;
             let kind = self.piece.kind;
             let cells = self.piece.cells();
@@ -519,6 +523,10 @@ impl Tetris {
         self.glide_x = 0.0;
         self.fall_accum = 0.0;
         self.squash = 1.0;
+        // A hard drop lands with a thunk even when it clears nothing: the
+        // slam is the player's own violence, and it should be felt every
+        // time, not only when the board pays.
+        let slammed = std::mem::take(&mut self.slammed);
         let spin = rules::classify(&self.board, &self.piece, self.spun);
         let kind = self.piece.kind;
         let cells = self.piece.cells();
@@ -581,6 +589,11 @@ impl Tetris {
         self.bump(action, perfect, was_b2b);
 
         if !cleared {
+            if slammed {
+                self.hitstop = self.hitstop.max(2);
+                self.punch = self.punch.max(0.3);
+                self.shake = self.shake.max(1.0);
+            }
             if lock_out || !self.spawn() {
                 self.over = true;
                 self.punch = 1.0;
@@ -1344,7 +1357,7 @@ mod balance {
         // those two the shape is the decay's business.
         let open = at(0).fall_seconds();
         assert!(
-            (0.25..=0.35).contains(&open),
+            (0.18..=0.26).contains(&open),
             "opening gravity {open} is outside the playable band"
         );
         for secs in [0, 30, 60, 120, 300, 900] {

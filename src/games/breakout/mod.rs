@@ -45,14 +45,14 @@ const BALLS: u32 = 3;
 const PADDLE_W: f32 = 4.0;
 const PADDLE_SHRUNK: f32 = 3.0;
 /// Cells per second the paddle moves while a direction is held.
-const PADDLE_SPEED: f32 = 26.0;
+const PADDLE_SPEED: f32 = 28.0;
 
 /// Ball speed in cells per second: the serve, the two hit-count steps, the
 /// deep-row step, and the ceiling every later wall adds onto.
-const SPEED_LADDER: [f32; 4] = [9.0, 11.5, 14.0, 17.0];
+const SPEED_LADDER: [f32; 4] = [10.5, 13.0, 15.5, 18.5];
 const SPEED_HITS: [u32; 2] = [4, 12];
-const WALL_SPEED: f32 = 1.5;
-const SPEED_CAP: f32 = 21.0;
+const WALL_SPEED: f32 = 1.7;
+const SPEED_CAP: f32 = 23.0;
 
 /// The serve: how long the ball sits on the paddle before it launches
 /// itself. Long enough to find the paddle, short enough to never be a wait.
@@ -428,7 +428,7 @@ impl Breakout {
                 self.ball.1 = py - 0.55;
                 self.hits += 1;
                 self.hitstop = self.hitstop.max(HITSTOP_PADDLE);
-                self.punch = self.punch.max(0.15);
+                self.punch = self.punch.max(0.2);
                 self.heat = (self.heat + 0.04).min(1.0);
                 return;
             }

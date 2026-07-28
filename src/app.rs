@@ -41,20 +41,20 @@ const COIN_TIME: f32 = 0.40;
 
 /// How long the wheel turns, how long the winner is held after it stops, and
 /// how many slots it travels.
-const SPIN_TIME: Duration = Duration::from_millis(950);
-const SPIN_HOLD: f32 = 0.30;
+const SPIN_TIME: Duration = Duration::from_millis(800);
+const SPIN_HOLD: f32 = 0.25;
 const SPIN_SLOTS: usize = 9;
 
 /// The settle after a crash: how long the picture takes to go down, how long
 /// the score counter takes to climb, and how long the whole thing is held.
 const SINK_TIME: f32 = 0.35;
 const COUNT_TIME: f32 = 0.45;
-const OVER_TIME: f32 = 1.0;
+const OVER_TIME: f32 = 0.7;
 /// A record is worth looking at for longer than a bad run.
-const OVER_TIME_RECORD: f32 = 1.6;
+const OVER_TIME_RECORD: f32 = 1.2;
 
 /// How long the board stays up before the wheel turns again.
-const BOARD_TIME: f32 = 1.2;
+const BOARD_TIME: f32 = 0.8;
 
 /// How long the tube takes to cut out and to come back. Short: this is a cut
 /// between two things, not a scene of its own.
@@ -394,6 +394,16 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                 keys: &keys,
                 host,
             });
+        }
+
+        // A frame that ran no sim step must not discard its input: the
+        // wake-on-key pacing means a press often arrives with only a few
+        // milliseconds on the accumulator, and the step that would consume it
+        // runs next frame. Without this, that press simply vanished — the
+        // intermittent dead key that read as input lag, and the ignored mash
+        // that made every screen wait feel longer than it was.
+        if steps == 0 {
+            banked.merge(&poll.keys);
         }
 
         stage.progress = host.progress();
