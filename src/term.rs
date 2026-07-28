@@ -347,7 +347,10 @@ impl Pad {
                     // rotate, drop, hold — is an edge, and a release of it is
                     // not a second press.
                     if k.kind == KeyEventKind::Release {
-                        for (i, d) in direction(k.code).into_iter().enumerate().filter(|(_, d)| *d)
+                        for (i, d) in direction(k.code)
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(_, d)| *d)
                         {
                             let _ = d;
                             self.held[i] = false;

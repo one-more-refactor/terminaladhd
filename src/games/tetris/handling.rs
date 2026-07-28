@@ -160,7 +160,11 @@ mod tests {
     #[test]
     fn a_fresh_press_moves_once_then_waits_out_das() {
         let mut h = Handling::new(0);
-        assert_eq!(h.autoshift(1, ms(16)), 1, "the first press moves on the spot");
+        assert_eq!(
+            h.autoshift(1, ms(16)),
+            1,
+            "the first press moves on the spot"
+        );
         // Still inside DAS after the immediate move: nothing repeats.
         let mut held = Duration::ZERO;
         while held + ms(16) < DAS {
@@ -176,7 +180,7 @@ mod tests {
         let mut h = Handling::new(0);
         h.autoshift(1, ms(0)); // press
         h.autoshift(1, DAS); // charge exactly to the boundary -> one pulse
-        // From here each ARR is worth one more pulse.
+                             // From here each ARR is worth one more pulse.
         assert_eq!(h.autoshift(1, ARR), 1);
         assert_eq!(h.autoshift(1, ARR), 1);
         // A dt spanning three ARRs owes three shifts at once.

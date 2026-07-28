@@ -352,7 +352,10 @@ mod tests {
                 let l = kind.layout(w, h);
                 assert_eq!(l.right_col.is_some(), l.side >= SIDE_MIN);
                 if let Some((x, _)) = l.right_col {
-                    assert!(x > l.arena.x1 && x < w, "{kind:?} {w}x{h}: column off-frame");
+                    assert!(
+                        x > l.arena.x1 && x < w,
+                        "{kind:?} {w}x{h}: column off-frame"
+                    );
                 }
                 if let Some((x, _)) = l.left_col {
                     assert!(x < l.arena.x0, "{kind:?} {w}x{h}: column overlaps arena");

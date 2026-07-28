@@ -43,9 +43,17 @@ pub fn resolve_d(px: &[Rgb], w: usize, sh: usize, tol: i32, dither: bool, out: &
             let t = to_srgb8(px[(2 * y) * w + x], dt);
             let b = to_srgb8(px[(2 * y + 1) * w + x], db);
             if near(t, b, tol) {
-                out.push(Cell { half: false, fg: t, bg: t });
+                out.push(Cell {
+                    half: false,
+                    fg: t,
+                    bg: t,
+                });
             } else {
-                out.push(Cell { half: true, fg: t, bg: b });
+                out.push(Cell {
+                    half: true,
+                    fg: t,
+                    bg: b,
+                });
             }
         }
     }

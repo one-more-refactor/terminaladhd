@@ -102,7 +102,10 @@ impl Action {
     /// spin (cleared or not), or a clean lock — leaves it as it was; a
     /// spin-clearing-nothing is neutral by construction here.
     pub fn ends_back_to_back(self) -> bool {
-        matches!(self, Action::LineClear(1) | Action::LineClear(2) | Action::LineClear(3))
+        matches!(
+            self,
+            Action::LineClear(1) | Action::LineClear(2) | Action::LineClear(3)
+        )
     }
 }
 
@@ -185,7 +188,10 @@ mod tests {
             assert_eq!(a.points, expected, "{rows} rows at level 1");
         }
         // The table scales with the level and nothing else.
-        assert_eq!(award(Action::LineClear(1), 5, false, 1, false).points, 100 * 5);
+        assert_eq!(
+            award(Action::LineClear(1), 5, false, 1, false).points,
+            100 * 5
+        );
     }
 
     #[test]
@@ -221,29 +227,73 @@ mod tests {
 
     #[test]
     fn a_t_spin_double_pays_the_spin_table() {
-        let a = award(Action::TSpin { lines: 2, mini: false }, 1, false, 1, false);
+        let a = award(
+            Action::TSpin {
+                lines: 2,
+                mini: false,
+            },
+            1,
+            false,
+            1,
+            false,
+        );
         assert_eq!(a.points, TSPIN_POINTS[2]);
         assert!(a.back_to_back, "a T-spin arms the chain like a tetris does");
     }
 
     #[test]
     fn a_t_spin_mini_pays_the_mini_table() {
-        let a = award(Action::TSpin { lines: 1, mini: true }, 1, false, 1, false);
+        let a = award(
+            Action::TSpin {
+                lines: 1,
+                mini: true,
+            },
+            1,
+            false,
+            1,
+            false,
+        );
         assert_eq!(a.points, TSPIN_MINI_POINTS[1]);
     }
 
     #[test]
     fn a_spin_that_clears_nothing_pays_but_is_neutral_for_b2b() {
         // Chain armed going in; a zero-line T-spin must not disturb it.
-        let a = award(Action::TSpin { lines: 0, mini: false }, 1, true, 0, false);
+        let a = award(
+            Action::TSpin {
+                lines: 0,
+                mini: false,
+            },
+            1,
+            true,
+            0,
+            false,
+        );
         assert_eq!(a.points, TSPIN_POINTS[0], "no clear, so no half again");
         assert!(a.back_to_back, "the chain is left exactly as it was");
 
         // And it neither starts nor ends the chain when the chain was cold.
-        let cold = award(Action::TSpin { lines: 0, mini: false }, 1, false, 0, false);
+        let cold = award(
+            Action::TSpin {
+                lines: 0,
+                mini: false,
+            },
+            1,
+            false,
+            0,
+            false,
+        );
         assert!(!cold.back_to_back, "a spin clearing nothing cannot arm b2b");
-        assert!(!Action::TSpin { lines: 0, mini: false }.starts_back_to_back());
-        assert!(!Action::TSpin { lines: 0, mini: false }.ends_back_to_back());
+        assert!(!Action::TSpin {
+            lines: 0,
+            mini: false
+        }
+        .starts_back_to_back());
+        assert!(!Action::TSpin {
+            lines: 0,
+            mini: false
+        }
+        .ends_back_to_back());
     }
 
     #[test]
@@ -286,14 +336,23 @@ mod tests {
     #[test]
     fn classify_maps_spin_and_lines_to_the_right_action() {
         assert_eq!(Action::classify(Mino::O, Spin::None, 0), Action::Nothing);
-        assert_eq!(Action::classify(Mino::I, Spin::None, 4), Action::LineClear(4));
+        assert_eq!(
+            Action::classify(Mino::I, Spin::None, 4),
+            Action::LineClear(4)
+        );
         assert_eq!(
             Action::classify(Mino::T, Spin::Full, 2),
-            Action::TSpin { lines: 2, mini: false }
+            Action::TSpin {
+                lines: 2,
+                mini: false
+            }
         );
         assert_eq!(
             Action::classify(Mino::T, Spin::Mini, 1),
-            Action::TSpin { lines: 1, mini: true }
+            Action::TSpin {
+                lines: 1,
+                mini: true
+            }
         );
         // A "full" spin on a non-T is an all-spin, not a T-spin.
         assert_eq!(Action::classify(Mino::S, Spin::Full, 1), Action::AllSpin(1));

@@ -375,7 +375,15 @@ pub fn pop(b: &mut Buf, l: &Layout, p: &crate::games::Pop, shake: i32) {
     let rise = ((1.0 - p.life) * 7.0) as i32;
     let fade = (p.life * 1.6).min(1.0);
     let col = c(WHITE).lerp(c(YELLOW), 1.0 - p.life).mul(fade);
-    text_center(b, &label, px as i32, py as i32 - 2 - rise, 1, col, 0.9 * fade);
+    text_center(
+        b,
+        &label,
+        px as i32,
+        py as i32 - 2 - rise,
+        1,
+        col,
+        0.9 * fade,
+    );
 }
 
 /// A radial burst out of a point, in emissive light only — what a cleared row

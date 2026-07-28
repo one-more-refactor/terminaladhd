@@ -80,7 +80,11 @@ impl Ramp {
         for i in 0..s.len() - 1 {
             if t <= s[i + 1].0 {
                 let span = s[i + 1].0 - s[i].0;
-                let k = if span <= 0.0 { 0.0 } else { (t - s[i].0) / span };
+                let k = if span <= 0.0 {
+                    0.0
+                } else {
+                    (t - s[i].0) / span
+                };
                 // smoothstep between stops: removes the visible crease a plain
                 // lerp leaves at every stop when only ~30 rows sample the ramp
                 let k = k * k * (3.0 - 2.0 * k);

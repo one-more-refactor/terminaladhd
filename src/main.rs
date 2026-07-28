@@ -65,14 +65,19 @@ fn parse(argv: Vec<String>) -> Result<Args> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--size" => {
-                let v = it.next().ok_or_else(|| anyhow::anyhow!("--size needs WxH"))?;
+                let v = it
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--size needs WxH"))?;
                 let (w, h) = v
                     .split_once(['x', 'X'])
                     .ok_or_else(|| anyhow::anyhow!("--size wants WxH, got {v:?}"))?;
                 out.size = Some((w.trim().parse()?, h.trim().parse()?));
             }
             "--shot" => {
-                out.shot = Some(it.next().ok_or_else(|| anyhow::anyhow!("--shot needs a dir"))?);
+                out.shot = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow::anyhow!("--shot needs a dir"))?,
+                );
             }
             "--bench" => out.bench = true,
             "--lean" => out.lean = Some(true),
@@ -103,12 +108,7 @@ fn main() -> ExitCode {
 /// `None` means it went down — the terminal is already restored (the panic
 /// hook in [`term::Guard`] runs before the unwind) and the panic itself is
 /// already on stderr.
-fn arcade(
-    host: &mut dyn app::Host,
-    w: usize,
-    h: usize,
-    quality: Quality,
-) -> Result<Option<Exit>> {
+fn arcade(host: &mut dyn app::Host, w: usize, h: usize, quality: Quality) -> Result<Option<Exit>> {
     match catch_unwind(AssertUnwindSafe(|| app::run(host, w, h, quality))) {
         Ok(result) => result.map(Some),
         Err(_) => Ok(None),
@@ -350,17 +350,40 @@ fn bench(w: usize, h: usize) -> Result<()> {
         (total / FRAMES, total as f64 * 60.0 / FRAMES as f64, cpu_ms)
     };
 
-    println!("terminaladhd bench — {w}x{h}, {FRAMES} frames of real play
-");
-    println!("{:<26} {:>10} {:>12} {:>9}", "", "bytes/frame", "KB/s at 60", "ms/frame");
+    println!(
+        "terminaladhd bench — {w}x{h}, {FRAMES} frames of real play
+"
+    );
+    println!(
+        "{:<26} {:>10} {:>12} {:>9}",
+        "", "bytes/frame", "KB/s at 60", "ms/frame"
+    );
 
     let full = Quality::full();
     let variants: [(&str, Quality); 9] = [
         ("full", full),
-        ("full, no warp", Quality { warp: false, ..full }),
+        (
+            "full, no warp",
+            Quality {
+                warp: false,
+                ..full
+            },
+        ),
         ("full, no hum", Quality { hum: false, ..full }),
-        ("full, no fringe", Quality { fringe: false, ..full }),
-        ("full, no bloom", Quality { bloom: false, ..full }),
+        (
+            "full, no fringe",
+            Quality {
+                fringe: false,
+                ..full
+            },
+        ),
+        (
+            "full, no bloom",
+            Quality {
+                bloom: false,
+                ..full
+            },
+        ),
         ("full, tol 6", Quality { tol: 6, ..full }),
         ("full, tol 14", Quality { tol: 14, ..full }),
         ("full, tol 24", Quality { tol: 24, ..full }),

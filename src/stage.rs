@@ -16,12 +16,12 @@ use std::time::Duration;
 use crate::games::{Game, Kind};
 use crate::scores::Entry;
 use crate::world::cabinet::{ground, pop, rule, strip, Strip};
+use crate::world::crt;
 use crate::world::draw::{lit, ring, text, text_center, text_w};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
-use crate::world::crt;
-use crate::world::{bloom, chrome_word, chrome_word_w, hex, resolve_d, scanlines, Buf, Cell, Rgb};
 use crate::world::Warp;
+use crate::world::{bloom, chrome_word, chrome_word_w, hex, resolve_d, scanlines, Buf, Cell, Rgb};
 
 /// Bloom radius, sample step and weight. Wider and hotter than a lit picture
 /// would want: on a black ground the bloom *is* the light, and a phosphor
@@ -427,7 +427,15 @@ impl Stage {
 
         // The one blinking thing on the screen, at the rate every cabinet used.
         if (t * 1.6) as i32 % 2 == 0 {
-            text_center(&mut self.buf, "PRESS ENTER", cx, mid as i32 + 8, 2, c(YELLOW), 1.2);
+            text_center(
+                &mut self.buf,
+                "PRESS ENTER",
+                cx,
+                mid as i32 + 8,
+                2,
+                c(YELLOW),
+                1.2,
+            );
         }
         // The record lives here and on the board, and nowhere else. It is not
         // something you look at while playing.
@@ -460,10 +468,24 @@ impl Stage {
         let cx = self.layout.w as i32 / 2;
         let mid = self.layout.h as f32;
         let scale = hero_scale("CREDIT", self.layout.w, 3);
-        chrome_word(&mut self.buf, "CREDIT", scale, self.layout.w as f32 * 0.5, mid - 6.0);
+        chrome_word(
+            &mut self.buf,
+            "CREDIT",
+            scale,
+            self.layout.w as f32 * 0.5,
+            mid - 6.0,
+        );
         // The count lands on the frame the coin does and sits there. One
         // credit, because there is only ever one game about to happen.
-        text_center(&mut self.buf, "01", cx, mid as i32 + 5 * scale as i32 - 2, 2, c(YELLOW), 1.2);
+        text_center(
+            &mut self.buf,
+            "01",
+            cx,
+            mid as i32 + 5 * scale as i32 - 2,
+            2,
+            c(YELLOW),
+            1.2,
+        );
         // A ring going out from the middle, once, on the first third.
         if age < 0.2 {
             let r = age / 0.2;
@@ -568,7 +590,15 @@ impl Stage {
 
         let hue = if s.record { c(YELLOW) } else { c(CYAN) };
         let cx = l.w as i32 / 2;
-        text_center(&mut self.buf, &format!("{:06}", s.shown), cx, mid as i32 + 6, 2, hue, 1.2);
+        text_center(
+            &mut self.buf,
+            &format!("{:06}", s.shown),
+            cx,
+            mid as i32 + 6,
+            2,
+            hue,
+            1.2,
+        );
 
         // The run, in the two numbers the game keeps. Only once the counter has
         // finished climbing, so there is one thing to read at a time.
@@ -594,7 +624,13 @@ impl Stage {
         let cx = self.layout.w as i32 / 2;
         let mid = self.layout.h as f32;
         let scale = hero_scale("PAUSED", self.layout.w, 3);
-        chrome_word(&mut self.buf, "PAUSED", scale, self.layout.w as f32 * 0.5, mid);
+        chrome_word(
+            &mut self.buf,
+            "PAUSED",
+            scale,
+            self.layout.w as f32 * 0.5,
+            mid,
+        );
         {
             text_center(
                 &mut self.buf,
@@ -670,7 +706,15 @@ impl Stage {
         let floor = self.layout.ticker_sub.unwrap_or(2 * self.layout.h - 6) as i32;
         let n = (((floor - y - 2) / 8).max(3) as usize).min(rows.len());
         for (key, what) in rows.iter().take(n) {
-            text(&mut self.buf, key, gutter - 4 - text_w(key, 1), y, 1, c(YELLOW), 0.3);
+            text(
+                &mut self.buf,
+                key,
+                gutter - 4 - text_w(key, 1),
+                y,
+                1,
+                c(YELLOW),
+                0.3,
+            );
             text(&mut self.buf, what, gutter + 4, y, 1, c(STEEL), 0.0);
             y += 8;
         }
@@ -684,10 +728,22 @@ impl Stage {
         ground(&mut self.buf);
         let cx = self.layout.w as i32 / 2;
         let mid = self.layout.h as i32;
-        text_center(&mut self.buf, "SCREEN TOO SMALL", cx, mid - 6, 1, c(YELLOW), 0.6);
         text_center(
             &mut self.buf,
-            &format!("NEEDS {}x{}", crate::term::MIN_SIZE.0, crate::term::MIN_SIZE.1),
+            "SCREEN TOO SMALL",
+            cx,
+            mid - 6,
+            1,
+            c(YELLOW),
+            0.6,
+        );
+        text_center(
+            &mut self.buf,
+            &format!(
+                "NEEDS {}x{}",
+                crate::term::MIN_SIZE.0,
+                crate::term::MIN_SIZE.1
+            ),
             cx,
             mid + 2,
             1,
@@ -715,7 +771,13 @@ impl Stage {
         // band is drawn through the status strip.
         let th = 7 * scale as i32;
         let title_cy = self.layout.rule_sub as i32 + 3 + th / 2;
-        chrome_word(&mut self.buf, "HIGH SCORES", scale, self.layout.w as f32 * 0.5, title_cy as f32);
+        chrome_word(
+            &mut self.buf,
+            "HIGH SCORES",
+            scale,
+            self.layout.w as f32 * 0.5,
+            title_cy as f32,
+        );
         let top = title_cy + th / 2 + 3;
         text_center(&mut self.buf, kind.name(), cx, top, 1, c(CYAN), 0.5);
 
@@ -743,7 +805,15 @@ impl Stage {
             };
             let line = format!("{:>3}  {:06}", place(i), e.score);
             let x = cx - text_w(&line, 1) / 2;
-            text(&mut self.buf, &line, x, y, 1, hue, if new { 1.2 } else { 0.2 });
+            text(
+                &mut self.buf,
+                &line,
+                x,
+                y,
+                1,
+                hue,
+                if new { 1.2 } else { 0.2 },
+            );
         }
         self.close(tick);
     }
@@ -834,7 +904,10 @@ impl Stage {
         let hue = self.fired_hue;
         // Consumed rather than cleared by the caller: a flash that outlives the
         // frame that asked for it is a white screen nobody can explain.
-        crt::invert(&mut self.px, std::mem::take(&mut self.invert).max(beat.invert));
+        crt::invert(
+            &mut self.px,
+            std::mem::take(&mut self.invert).max(beat.invert),
+        );
         crt::wash(&mut self.px, c(WHITE), std::mem::take(&mut self.flash));
         crt::wash(&mut self.px, hue, beat.wash);
         if self.rip.1 > 0.0 && beat.wash + beat.invert > 0.0 {
@@ -842,7 +915,11 @@ impl Stage {
         }
         let extra = std::mem::take(&mut self.fringe);
         if self.quality.fringe || extra > 0.0 {
-            let rest = if self.quality.fringe { FRINGE_REST } else { 0.0 };
+            let rest = if self.quality.fringe {
+                FRINGE_REST
+            } else {
+                0.0
+            };
             crt::fringe(&mut self.px, &mut self.scratch, w, sh, rest + extra);
         }
         if self.quality.hum {
@@ -985,7 +1062,10 @@ mod tests {
         s.fire(strobe::HUGE, c(WHITE));
         // By the time a queued strobe played, whatever asked for it would be
         // long over — so the big one takes the screen now.
-        assert_eq!(s.fired.map(|(p, i)| (p.len(), i)), Some((strobe::HUGE.len(), 0)));
+        assert_eq!(
+            s.fired.map(|(p, i)| (p.len(), i)),
+            Some((strobe::HUGE.len(), 0))
+        );
     }
 
     #[test]

@@ -226,7 +226,10 @@ mod tests {
         for _ in 0..30 {
             s.step(0.016);
         }
-        assert!(s.items[0].y > 0.0, "debris that does not fall is a screensaver");
+        assert!(
+            s.items[0].y > 0.0,
+            "debris that does not fall is a screensaver"
+        );
 
         let mut t = Sparks::new();
         t.glimmer(&mut rng, (0.0, 0.0), 1, white());
@@ -244,7 +247,10 @@ mod tests {
         let left = s.items.iter().filter(|k| k.x < 5.0).collect::<Vec<_>>();
         let right = s.items.iter().filter(|k| k.x > 5.0).collect::<Vec<_>>();
         assert!(left.iter().all(|k| k.vx <= 0.0), "the left half went right");
-        assert!(right.iter().all(|k| k.vx >= 0.0), "the right half went left");
+        assert!(
+            right.iter().all(|k| k.vx >= 0.0),
+            "the right half went left"
+        );
     }
 
     #[test]

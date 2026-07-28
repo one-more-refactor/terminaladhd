@@ -170,9 +170,10 @@ impl Board {
     /// has to be in one of those rows. Checked before the collapse, which is
     /// where the Perfect Clear is detected.
     pub fn perfect_clear(&self, rows: &[usize]) -> bool {
-        self.cells.iter().enumerate().all(|(row, cells)| {
-            rows.contains(&row) || cells.iter().all(|cell| cell.is_none())
-        })
+        self.cells
+            .iter()
+            .enumerate()
+            .all(|(row, cells)| rows.contains(&row) || cells.iter().all(|cell| cell.is_none()))
     }
 }
 
@@ -208,7 +209,11 @@ impl Piece {
 
     /// Bottom-most row the piece occupies.
     pub fn bottom(&self) -> i32 {
-        self.cells().iter().map(|&(_, row)| row).max().unwrap_or(self.y)
+        self.cells()
+            .iter()
+            .map(|&(_, row)| row)
+            .max()
+            .unwrap_or(self.y)
     }
 
     /// Row the piece comes to rest on if dropped straight down from here.
@@ -475,7 +480,11 @@ mod tests {
             board.fits(piece.kind, piece.rot, piece.x, piece.y),
             "the S's own cells must be clear"
         );
-        assert_eq!(classify(&board, &piece, Some(0)), Spin::Full, "wedged S spins");
+        assert_eq!(
+            classify(&board, &piece, Some(0)),
+            Spin::Full,
+            "wedged S spins"
+        );
 
         // The same S with room around it is not a spin.
         let open = Board::new();
@@ -523,7 +532,10 @@ mod tests {
         for col in 0..COLS {
             board.cells[FLOOR][col] = Some(Mino::I);
         }
-        assert!(board.perfect_clear(&[FLOOR]), "a single full row and nothing else");
+        assert!(
+            board.perfect_clear(&[FLOOR]),
+            "a single full row and nothing else"
+        );
         board.cells[FLOOR - 1][0] = Some(Mino::L);
         assert!(
             !board.perfect_clear(&[FLOOR]),

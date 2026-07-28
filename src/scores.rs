@@ -39,7 +39,9 @@ impl Table {
     pub fn load() -> Table {
         match path() {
             Some(p) => {
-                let rows = fs::read_to_string(&p).map(|s| parse(&s)).unwrap_or_default();
+                let rows = fs::read_to_string(&p)
+                    .map(|s| parse(&s))
+                    .unwrap_or_default();
                 Table {
                     rows,
                     path: Some(p),
@@ -52,7 +54,9 @@ impl Table {
     /// A table backed by a specific file — the seam the tests use, and what
     /// `ADHD_SCORES` points at.
     pub fn at(path: &Path) -> Table {
-        let rows = fs::read_to_string(path).map(|s| parse(&s)).unwrap_or_default();
+        let rows = fs::read_to_string(path)
+            .map(|s| parse(&s))
+            .unwrap_or_default();
         Table {
             rows,
             path: Some(path.to_path_buf()),
@@ -93,7 +97,9 @@ impl Table {
     /// failure here is silent, because there is nowhere to report it from
     /// inside the alternate screen and it costs the player nothing right now.
     fn save(&mut self) {
-        let Some(path) = self.path.clone() else { return };
+        let Some(path) = self.path.clone() else {
+            return;
+        };
         let mut out = String::new();
         for kind in crate::games::ALL {
             for e in self.top(kind) {

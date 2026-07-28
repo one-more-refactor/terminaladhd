@@ -148,7 +148,11 @@ fn body(b: &mut Buf, l: &Layout, g: &Snake, shake: i32) {
         // always there, and a rope that only moves when the snake does is a
         // rope nobody looks at twice.
         let wave = ((g.elapsed.as_secs_f32() * 5.0 - t * 6.0).sin() * 0.5 + 0.5).powi(3);
-        let halo = if i == 0 { 0.9 } else { 0.30 * (1.0 - t) + 0.5 * wave };
+        let halo = if i == 0 {
+            0.9
+        } else {
+            0.30 * (1.0 - t) + 0.5 * wave
+        };
         pill(b, x, y, p, col, if igniting { 1.5 } else { halo });
         if i == 0 && !igniting {
             eyes(b, x, y, p, g.dir());

@@ -87,7 +87,10 @@ impl Command {
                 let status = child.wait();
                 // A signal death has no exit code; 130 is the shell's own
                 // convention for it, and something must be reported.
-                code.store(status.ok().and_then(|s| s.code()).unwrap_or(130), Ordering::SeqCst);
+                code.store(
+                    status.ok().and_then(|s| s.code()).unwrap_or(130),
+                    Ordering::SeqCst,
+                );
                 done.store(true, Ordering::SeqCst);
             });
         }
@@ -113,7 +116,10 @@ impl Command {
     /// Replay the captured stderr tail once the world is gone. Only worth doing
     /// on a failure — on success the noise was noise.
     pub fn replay_tail(&self) -> Result<()> {
-        let tail = self.tail.lock().map_err(|_| anyhow::anyhow!("tail poisoned"))?;
+        let tail = self
+            .tail
+            .lock()
+            .map_err(|_| anyhow::anyhow!("tail poisoned"))?;
         let mut err = std::io::stderr();
         for l in tail.iter() {
             writeln!(err, "{l}")?;
@@ -242,7 +248,10 @@ mod tests {
 
     #[test]
     fn sanitize_keeps_ordinary_text() {
-        assert_eq!(sanitize("   Compiling serde v1.0"), "   Compiling serde v1.0");
+        assert_eq!(
+            sanitize("   Compiling serde v1.0"),
+            "   Compiling serde v1.0"
+        );
     }
 
     fn v(xs: &[&str]) -> Vec<String> {

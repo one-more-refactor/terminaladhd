@@ -9,7 +9,11 @@ pub struct Rgb {
 }
 
 impl Rgb {
-    pub const ZERO: Rgb = Rgb { r: 0.0, g: 0.0, b: 0.0 };
+    pub const ZERO: Rgb = Rgb {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+    };
 
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Rgb { r, g, b }
@@ -80,12 +84,7 @@ pub fn to_srgb8(c: Rgb, dither: f32) -> [u8; 3] {
 
 /// 4x4 Bayer, returned centred on zero in units of one 8-bit step.
 pub fn bayer4(x: usize, y: usize) -> f32 {
-    const M: [[u8; 4]; 4] = [
-        [0, 8, 2, 10],
-        [12, 4, 14, 6],
-        [3, 11, 1, 9],
-        [15, 7, 13, 5],
-    ];
+    const M: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
     (M[y & 3][x & 3] as f32 + 0.5) / 16.0 - 0.5
 }
 

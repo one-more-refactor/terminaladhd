@@ -11,8 +11,8 @@
 //! Everything scales from `(w, h)` and nothing is reserved for decoration: the
 //! arena takes every row the chrome does not need.
 
-pub mod color;
 pub mod cabinet;
+pub mod color;
 pub mod crt;
 pub mod draw;
 pub mod encode;
@@ -20,8 +20,8 @@ pub mod font;
 pub mod layout;
 pub mod scene;
 pub mod spark;
-pub mod warp;
 pub mod tiny;
+pub mod warp;
 
 pub use color::{
     bayer4, hex, linear_to_srgb, srgb_to_linear, to_16, to_256, to_256_d, to_srgb8, Rgb, ANSI16,
@@ -31,8 +31,8 @@ pub use encode::{
 };
 pub use layout::{Layout, Rect};
 pub use scene::{
-    bloom, chrome_ramp, chrome_word, chrome_word_w, palette, posterize, resolve_no_bloom, scanlines,
-    smoothstep, Buf, Ramp,
+    bloom, chrome_ramp, chrome_word, chrome_word_w, palette, posterize, resolve_no_bloom,
+    scanlines, smoothstep, Buf, Ramp,
 };
 pub use spark::Sparks;
 pub use warp::Warp;

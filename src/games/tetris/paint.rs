@@ -41,7 +41,14 @@ fn hold_column(b: &mut Buf, l: &Layout, hold: Option<Mino>, ready: bool) {
         // A spent hold is drawn at a third: the slot is visibly not available
         // again until the next piece locks.
         let k = if ready { 1.0 } else { 0.33 };
-        brick(b, hx as i32, inner, l.mino_px as i32, m.color().mul(k), 0.8 * k);
+        brick(
+            b,
+            hx as i32,
+            inner,
+            l.mino_px as i32,
+            m.color().mul(k),
+            0.8 * k,
+        );
     }
 }
 
@@ -79,7 +86,6 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Tetris) {
         );
         y += pitch;
     }
-
 }
 
 pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
@@ -142,7 +148,14 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
             } else {
                 0
             };
-            brick(b, x, y + squash, p - squash.min(p - 1), m.color().mul(0.82), 0.32);
+            brick(
+                b,
+                x,
+                y + squash,
+                p - squash.min(p - 1),
+                m.color().mul(0.82),
+                0.32,
+            );
         }
     }
 

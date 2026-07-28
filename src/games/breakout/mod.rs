@@ -216,7 +216,11 @@ impl Breakout {
     /// Which rung of the speed ladder the run is on, `0..=3` — the readout.
     pub fn tier(&self) -> usize {
         let s = self.speed();
-        SPEED_LADDER.iter().filter(|&&r| s >= r).count().saturating_sub(1)
+        SPEED_LADDER
+            .iter()
+            .filter(|&&r| s >= r)
+            .count()
+            .saturating_sub(1)
     }
 
     pub fn bricks(&self) -> &[Brick] {
@@ -432,15 +436,12 @@ impl Breakout {
         // which is as much physics as a brick ever had.
         let bx = x;
         let by = y;
-        let hit = self
-            .bricks
-            .iter()
-            .position(|b| {
-                bx >= b.at.0 as f32 - 0.2
-                    && bx <= b.at.0 as f32 + 2.2
-                    && by >= b.at.1 as f32 - 0.2
-                    && by <= b.at.1 as f32 + 1.2
-            });
+        let hit = self.bricks.iter().position(|b| {
+            bx >= b.at.0 as f32 - 0.2
+                && bx <= b.at.0 as f32 + 2.2
+                && by >= b.at.1 as f32 - 0.2
+                && by <= b.at.1 as f32 + 1.2
+        });
         if let Some(i) = hit {
             let b = self.bricks[i];
             let cx = b.at.0 as f32 + 1.0;
@@ -591,7 +592,11 @@ impl Game for Breakout {
         }
         // Which shoulder it plays for swings slowly with the clock, so the
         // demo works both sides of the court.
-        let aim = if (self.elapsed * 0.23).fract() < 0.5 { 1.0 } else { -1.0 };
+        let aim = if (self.elapsed * 0.23).fract() < 0.5 {
+            1.0
+        } else {
+            -1.0
+        };
         let err = self.ball.0 + aim * self.paddle_w * 0.42 - self.paddle;
         if err < -0.4 {
             input.left = true;
@@ -732,7 +737,10 @@ mod tests {
         assert_eq!(g.walls(), 1);
         assert!(!g.bricks().is_empty(), "the wall rebuilds");
         assert!(g.serving(), "and the ball re-serves");
-        assert!(g.speed() > before_speed, "every wall is faster than the last");
+        assert!(
+            g.speed() > before_speed,
+            "every wall is faster than the last"
+        );
         assert_eq!(g.take_kick(), Some(Kick::Huge));
         assert_eq!(g.take_hitstop(), HITSTOP_CLEAR);
     }
@@ -766,8 +774,14 @@ mod tests {
                 break;
             }
             let (x, y) = g.ball;
-            assert!(x >= -0.5 && x <= g.cols as f32 + 0.5, "ball left the court: {x}");
-            assert!(y >= -0.5 && y <= g.rows as f32 + 1.5, "ball fell through: {y}");
+            assert!(
+                x >= -0.5 && x <= g.cols as f32 + 0.5,
+                "ball left the court: {x}"
+            );
+            assert!(
+                y >= -0.5 && y <= g.rows as f32 + 1.5,
+                "ball fell through: {y}"
+            );
         }
     }
 
@@ -781,7 +795,10 @@ mod tests {
             steps += 1;
         }
         assert!(g.broken > 3, "the demo has to look like play: {}", g.broken);
-        assert!(g.is_over(), "and it has to end so the attract loop moves on");
+        assert!(
+            g.is_over(),
+            "and it has to end so the attract loop moves on"
+        );
     }
 
     #[test]
@@ -835,7 +852,10 @@ mod balance {
     #[test]
     fn the_deep_rows_pay_most() {
         for i in 1..ROW_POINTS.len() {
-            assert!(ROW_POINTS[i - 1] >= ROW_POINTS[i], "the ladder inverts at {i}");
+            assert!(
+                ROW_POINTS[i - 1] >= ROW_POINTS[i],
+                "the ladder inverts at {i}"
+            );
         }
         assert!(CLEAR_BONUS > ROW_POINTS[0] * 5, "the wall is worth chasing");
     }

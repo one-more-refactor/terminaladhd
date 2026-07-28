@@ -470,8 +470,13 @@ impl Snake {
         for (i, &(x, y)) in body.iter().enumerate() {
             let t = i as f32 / n;
             let hue = crate::world::hex(0x00F0FF).lerp(crate::world::hex(0xFF23C8), t);
-            self.sparks
-                .burst(&mut self.rng, (x as f32 + 0.5, y as f32 + 0.5), 3, 13.0, hue);
+            self.sparks.burst(
+                &mut self.rng,
+                (x as f32 + 0.5, y as f32 + 0.5),
+                3,
+                13.0,
+                hue,
+            );
         }
         self.heat = (self.heat + 0.4).min(1.0);
         self.queued.clear();
@@ -481,13 +486,7 @@ impl Snake {
 /// A free cell, chosen uniformly. Falls back to any in-bounds cell if the snake
 /// has filled the arena — at which point the run is won and about to end
 /// anyway, and a panic here would be the worst possible way to say so.
-fn place(
-    rng: &mut Rng,
-    body: &VecDeque<(i32, i32)>,
-    gold: bool,
-    cols: i32,
-    rows: i32,
-) -> Apple {
+fn place(rng: &mut Rng, body: &VecDeque<(i32, i32)>, gold: bool, cols: i32, rows: i32) -> Apple {
     let free: Vec<(i32, i32)> = (0..rows)
         .flat_map(|y| (0..cols).map(move |x| (x, y)))
         .filter(|c| !body.contains(c))
@@ -867,7 +866,10 @@ mod tests {
         g.eaten = TIER_SIZE - 1;
         assert_eq!(g.interval(), opening);
         g.eaten = TIER_SIZE;
-        assert!(g.interval() < opening, "a tier boundary speeds the snake up");
+        assert!(
+            g.interval() < opening,
+            "a tier boundary speeds the snake up"
+        );
         // And the ramp has a floor rather than running away.
         g.eaten = 10_000;
         assert_eq!(g.interval(), PERIODS[PERIODS.len() - 1]);

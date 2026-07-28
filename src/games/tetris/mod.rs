@@ -440,18 +440,23 @@ impl Tetris {
     }
 
     fn grounded(&self) -> bool {
-        !self
-            .board
-            .fits(self.piece.kind, self.piece.rot, self.piece.x, self.piece.y + 1)
+        !self.board.fits(
+            self.piece.kind,
+            self.piece.rot,
+            self.piece.x,
+            self.piece.y + 1,
+        )
     }
 
     /// Move the piece down one row if it fits. A move down is never a spin and
     /// refunds resets on reaching a new low.
     fn step_down(&mut self) -> bool {
-        if self
-            .board
-            .fits(self.piece.kind, self.piece.rot, self.piece.x, self.piece.y + 1)
-        {
+        if self.board.fits(
+            self.piece.kind,
+            self.piece.rot,
+            self.piece.x,
+            self.piece.y + 1,
+        ) {
             self.piece.y += 1;
             self.spun = None;
             self.handling.descend(self.piece.y);
@@ -462,10 +467,12 @@ impl Tetris {
     }
 
     fn try_shift(&mut self, dx: i32) -> bool {
-        if self
-            .board
-            .fits(self.piece.kind, self.piece.rot, self.piece.x + dx, self.piece.y)
-        {
+        if self.board.fits(
+            self.piece.kind,
+            self.piece.rot,
+            self.piece.x + dx,
+            self.piece.y,
+        ) {
             self.piece.x += dx;
             // The screen starts a cell behind and catches up. Capped at one
             // cell so a wall charge does not smear.
@@ -535,7 +542,9 @@ impl Tetris {
         }
         if cleared {
             let huge = rows.len() >= 4 || perfect;
-            self.hitstop = self.hitstop.max(if huge { HITSTOP_BIG } else { HITSTOP_CLEAR });
+            self.hitstop = self
+                .hitstop
+                .max(if huge { HITSTOP_BIG } else { HITSTOP_CLEAR });
             // A spin that cleared is worth as much noise as a triple: it is the
             // hardest thing in the game to set up and the easiest to miss.
             let spun = !matches!(action, Action::LineClear(_));
@@ -974,7 +983,11 @@ mod tests {
         }
         let mut idx: Vec<usize> = seen.iter().map(|&m| skin::index(m)).collect();
         idx.sort_unstable();
-        assert_eq!(idx, vec![0, 1, 2, 3, 4, 5, 6], "the opening bag holds each piece once");
+        assert_eq!(
+            idx,
+            vec![0, 1, 2, 3, 4, 5, 6],
+            "the opening bag holds each piece once"
+        );
     }
 
     #[test]
@@ -985,7 +998,11 @@ mod tests {
         game.step(&none(), dur(spr * 0.5));
         assert_eq!(game.piece.y, y0, "half a row of gravity does not move it");
         game.step(&none(), dur(spr * 0.6));
-        assert_eq!(game.piece.y, y0 + 1, "the accumulated row falls once it fills");
+        assert_eq!(
+            game.piece.y,
+            y0 + 1,
+            "the accumulated row falls once it fills"
+        );
     }
 
     #[test]
@@ -999,7 +1016,10 @@ mod tests {
         };
         // Half a natural row's worth of time drops many rows under soft.
         game.step(&input, dur(spr * 0.5));
-        assert!(game.piece.y > y0 + 1, "soft drop covers several rows at once");
+        assert!(
+            game.piece.y > y0 + 1,
+            "soft drop covers several rows at once"
+        );
         assert!(game.score > 0, "soft drop rows score a point each");
     }
 
@@ -1109,7 +1129,10 @@ mod tests {
             steps += 1;
             assert!(steps < 300, "the piece never locked — a reset leaked");
         }
-        assert!(steps > handling::LOCK_RESETS, "sliding bought no lock time at all");
+        assert!(
+            steps > handling::LOCK_RESETS,
+            "sliding bought no lock time at all"
+        );
     }
 
     #[test]
@@ -1325,7 +1348,10 @@ mod balance {
         // than a countdown. At rest a piece takes two seconds to cross the
         // well, and a grounded one keeps its full lock window on top of that.
         let fall = at(180).fall_seconds();
-        assert!(fall * VISIBLE as f32 > 1.8, "a piece crosses the well too fast");
+        assert!(
+            fall * VISIBLE as f32 > 1.8,
+            "a piece crosses the well too fast"
+        );
         assert!(handling::LOCK_DELAY >= Duration::from_millis(400));
     }
 }

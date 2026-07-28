@@ -192,7 +192,14 @@ pub fn collapse(px: &mut [Rgb], scratch: &mut Vec<Rgb>, w: usize, sh: usize, t: 
 ///
 /// `amount` is the worst displacement in sub-pixels and `phase` advances the
 /// wave, so a caller that fades `amount` to zero gets a degauss.
-pub fn wobble(px: &mut [Rgb], scratch: &mut Vec<Rgb>, w: usize, sh: usize, amount: f32, phase: f32) {
+pub fn wobble(
+    px: &mut [Rgb],
+    scratch: &mut Vec<Rgb>,
+    w: usize,
+    sh: usize,
+    amount: f32,
+    phase: f32,
+) {
     if amount < 0.4 {
         return;
     }
@@ -419,9 +426,7 @@ mod tests {
         hum(&mut a, w, sh, 0.2, 0.3);
         hum(&mut b, w, sh, 0.6, 0.3);
         assert_ne!(a, b, "the band is somewhere else a moment later");
-        let untouched = (0..sh)
-            .filter(|&y| (a[y * w].r - 0.5).abs() < 1e-6)
-            .count();
+        let untouched = (0..sh).filter(|&y| (a[y * w].r - 0.5).abs() < 1e-6).count();
         assert!(untouched > sh / 2, "most of the picture is not in the band");
     }
 
@@ -479,7 +484,9 @@ mod tests {
         let lit = (0..sh).filter(|&y| px[y * w].r > 0.01).count();
         assert!(lit > 0 && lit < sh / 2, "one band, not the picture: {lit}");
         // Brightest at its centre.
-        let peak = (0..sh).max_by(|a, b| px[a * w].r.total_cmp(&px[b * w].r)).unwrap();
+        let peak = (0..sh)
+            .max_by(|a, b| px[a * w].r.total_cmp(&px[b * w].r))
+            .unwrap();
         assert!((peak as i32 - sh as i32 / 2).abs() < 4, "peak at {peak}");
     }
 

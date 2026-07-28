@@ -17,9 +17,9 @@ use crate::games::{Game, Input, Kick, Kind, ALL};
 use crate::rng::Rng;
 use crate::scores::Table;
 use crate::stage::{clock, strobe, Quality, Settle, Stage, Tick};
-use crate::world::scene::palette::*;
-use crate::world::hex;
 use crate::term::{self, Keys};
+use crate::world::hex;
+use crate::world::scene::palette::*;
 
 /// One sim step. ARR is one step, so the handling machine's real-millisecond
 /// timers land on frame boundaries instead of straddling them.
@@ -339,7 +339,11 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             accumulator -= STEP;
             // Only the first step of a frame sees the input: catch-up steps run
             // neutral, so a hard drop never fires twice off one keypress.
-            let keys = if steps == 0 { poll.keys } else { Keys::default() };
+            let keys = if steps == 0 {
+                poll.keys
+            } else {
+                Keys::default()
+            };
             steps += 1;
             advance(Sim {
                 machine: &mut machine,
@@ -456,9 +460,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                     stage.board(demo_kind, &rows, None, idle, &teach);
                 }
             }
-            Mode::Coin { age, .. } => {
-                stage.coin(demo.as_ref(), *age, &tick)
-            }
+            Mode::Coin { age, .. } => stage.coin(demo.as_ref(), *age, &tick),
             Mode::Spin { reel, age } => {
                 let t = (age / SPIN_TIME.as_secs_f32()).clamp(0.0, 1.0);
                 // Ease out to the fifth: nearly all the travel is spent in the
@@ -799,7 +801,10 @@ mod tests {
         let travel = |t: f32| 1.0 - (1.0 - t).powi(5);
         let early = travel(0.2) - travel(0.1);
         let late = travel(1.0) - travel(0.9);
-        assert!(early > late * 8.0, "the wheel does not slow: {early} vs {late}");
+        assert!(
+            early > late * 8.0,
+            "the wheel does not slow: {early} vs {late}"
+        );
     }
 
     #[test]
