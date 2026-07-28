@@ -68,6 +68,18 @@ const CUT_IN: f32 = 0.22;
 /// How fast a flash blows off the tube.
 const FLASH_DECAY: f32 = 0.12;
 
+/// What the diff believes was on screen before the first frame: a cell the
+/// composer can never produce (a half-block with identical halves collapses
+/// to a space), so every cell of the first frame is painted — the black ones
+/// included. Diffing against a default (black) cell instead quietly assumed
+/// the terminal's own background was black, and on a light theme the whole
+/// surround simply never appeared.
+const UNPAINTED: screen::Cell = screen::Cell {
+    half: true,
+    fg: [255, 0, 255],
+    bg: [255, 0, 255],
+};
+
 /// What the loop is running for. The standalone arcade is [`Forever`]; a
 /// wrapped command reports through its own implementation, and the loop ends
 /// when [`Host::finished`] says so.
@@ -307,7 +319,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
 
     let mut canvas = Screen::new();
     let mut monitor = Monitor::fit(w0, h0);
-    let mut prev = vec![Default::default(); w0 * h0];
+    let mut prev = vec![UNPAINTED; w0 * h0];
     let mut presenter = term::Presenter::new();
     let mut term_size = (w0, h0);
     let mut small_said = false;
@@ -331,7 +343,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize) -> Result<Exit> {
             term_size = (cw, ch);
             if Monitor::fits(cw, ch) {
                 monitor = Monitor::fit(cw, ch);
-                prev = vec![Default::default(); cw * ch];
+                prev = vec![UNPAINTED; cw * ch];
                 small_said = false;
                 term::clear()?;
             }

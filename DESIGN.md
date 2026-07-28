@@ -5,510 +5,235 @@ says what it is for, and what was tried and thrown away.
 
 ## The premise
 
-You start something slow. For the next two minutes you are not working, you are
-waiting, and waiting is the worst-designed part of a developer's day. `adhd`
-takes those two minutes and makes them an arcade.
+You start something slow. For the next two minutes you are not working, you
+are waiting, and waiting is the worst-designed part of a developer's day.
+`adhd` takes those two minutes and makes them an arcade.
 
 Two consequences fall out of that immediately and both are load-bearing:
 
 **You do not pick the game.** A menu is a decision, and the whole reason you
-reached for this is that you did not want to decide anything. A wheel picks, and
-picks again after every death. The rotation is not a feature bolted on top; it
-is the product.
-
-**Nothing may cost you your command.** stdout belongs to the child, always. The
-exit code is the child's. If the command fails, its stderr is replayed rather
-than swallowed by the alternate screen. With no terminal at all it runs the
-command and gets out of the way rather than refusing. A toy that eats your build
-output — or that turns a working script into a failing one the moment you prefix
-it — is not a toy you keep installed.
-
-## One rule for the screen
-
-> Every pixel is either the game or feedback for the game.
-
-The first version broke this. It was a synthwave landscape — indigo sky, a
-slit-striped sun, a perspective grid running to a vanishing point — with the
-playfield cut into it. It was pretty. It was also a picture with a game on it,
-which is a 2015 album cover rather than a 1983 arcade machine, and it failed the
-rule on almost every pixel.
-
-Deleting the scenery deleted about as much code again, and that is the tell that
-the rule was right. The smoked plates behind every sign, the contrast fallbacks,
-the folded stat stacks, the "will this read against the magenta band" branches —
-all of that existed only to fight the picture. On black, ink is legible
-everywhere, and none of it is needed.
-
-What is on screen now:
-
-| layer | what it is | why it earns its place |
-|---|---|---|
-| ground | flat near-black | the black a monitor is at rest |
-| warp field | streaks flying outward from behind the arena | a readout of how well you are doing |
-| arena | the game | the game |
-| frame | a hard rail round the arena | says where the field ends, and nothing else |
-| columns | HOLD, NEXT, the readings | the numbers you are chasing |
-| strip | `1UP` / score / name / `HI` | conventions every player can already read |
-| monitor | bloom, scanlines, vignette, fringe, hum | says *tube* rather than *panel* |
-
-The warp field is the one that does the most work. It is not decoration: at rest
-it drifts, under the player's heat it stretches, and on a clear, an apple or a
-death it punches into hyperspace for a fifth of a second and falls back. Play
-well and the whole screen goes faster. No game knows it exists — games bank an
-impact, the shell spends it.
-
-## The games claim the width
-
-Snake's field used to be a fixed 26×14 wherever it was played, which on a wide
-terminal left it sitting in the middle of a lot of black. It is fourteen rows
-because that is what the height affords, and now as many columns as the width
-will carry — solved by taking the mino size the height forces and dividing the
-usable width by it. On a 270-column terminal that is a field roughly four times
-the area it used to be.
-
-The arena is fixed when a game is *spawned*, not recomputed from the terminal
-every frame, and the layout takes it from the running game rather than from the
-game's kind. That is what makes a resize safe: it changes how big a cell is
-drawn and never how many there are, so a snake can never find itself outside its
-own walls.
-
-Tetris cannot do this, and should not. Ten by twenty with square minos is twice
-as tall as it is wide, and that is the game.
-
-## Everything reflows from (width, height)
-
-`world::layout` is the only place a screen coordinate is allowed to come from. A
-raw literal reaching a draw call has to be a visible smell rather than a silent
-bug, so `Layout::for_field(w, h, cols, rows)` derives every rectangle and every
-draw call takes them from there.
-
-The rule it enforces is that **the arena takes every row the chrome does not
-need**. There is no scenery to protect any more, so the game gets the screen.
-
-Two constants come out of hard arithmetic rather than taste:
-
-- **`MIN_SIZE` is 80×26.** A twenty-row playfield at the smallest legible block
-  is twenty rows. The status face is five sub-rows and a cell is two, so the
-  strip and the ticker need three rows each. Twenty-six. No arrangement of the
-  chrome gets it lower without a second, shorter font.
-- **Text anchors in sub-rows, not rows.** Chasing that down took three bugs —
-  the progress rule drawn through the score, the ticker hanging off the bottom
-  of the frame, the board's title landing on the strip — all the same mistake.
-
-## Feel is shared, not per-game
-
-Two games that respond differently to the same event read as two programs. So
-the vocabulary lives on the `Game` trait and the shell spends it in one place:
-
-- **`take_hitstop()`** — render frames the whole machine freezes for. Time does
-  not accumulate during it; it is a debt paid in frames, not wall time the sim
-  owes itself afterwards. Three frames for an apple, ten for a death. This is
-  the single largest difference between a clear that *lands* and one that merely
-  changes colour.
-- **`take_punch()`** — impact, `0..1`, which the shell spends on the warp field,
-  the screen flash and, past a threshold, on the monitor itself.
-- **`pops()`** — `+N` markers floating off the cell that earned them. One face,
-  one rate, both games.
-- **`shout()`** — what to say. It goes into the status strip's middle slot,
-  taking it off the game's own name. A machine talks to you from its status
-  strip; a banner floating over the playfield is a modern habit, and at most
-  sizes there is nowhere to put one that does not collide with something.
-
-And one grammar for the side columns: `cabinet::heading` draws a label with a
-hairline fading out under it and returns where content starts. Both games stack
-everything through it, so the queue and the readings share a left edge and a
-rhythm.
-
-## The terminal will not tell you a key went up
-
-This was the single biggest thing standing between the machine and a game, and
-no amount of tuning inside the games could have found it, because the problem
-was never inside them.
-
-A terminal does not send a key-up. A held direction arrives as the operating
-system's own auto-repeat, which waits about half a second before it starts — so
-a piece moves once and then sits there, and then moves fast. All the DAS and
-auto-repeat handling in `tetris::handling` was written as though it had held-key
-state and it never had any: `keys.left` was only true on the frames a repeat
-event happened to land on.
-
-The kitty keyboard protocol reports press and release separately. `term::Pad`
-asks for it, and keeps the four directions across frames — whether a key is
-still down is a fact about the world rather than about this frame. On a terminal
-that supports it (kitty, foot, ghostty, WezTerm, recent xterm) the handling code
-finally means what it says.
-
-On one that does not, a direction is assumed held for sixty milliseconds after
-its last event. That is deliberately shorter than DAS, so a tap can never start
-an auto-shift: on such a terminal the only honest reading of a key event is
-"this happened once", and pretending otherwise would make a single press slide
-a piece across the well.
-
-## Everything glides
-
-The logic of both games moves in whole cells. Nothing on screen does.
-
-Snake was done first and tetris was left snapping, which is exactly what it felt
-like: one game moved and the other stepped. A falling piece is drawn part of a
-row down under gravity — `fall_accum` is already the fraction, so the position
-was there all along and only the painter had to ask for it — and part of a cell
-behind its own column after a sideways move, catching up over 55 ms. Whole-cell
-steps are what make a falling game feel like a spreadsheet.
-
-Two rules keep it honest. A **grounded piece sits exactly on its cell**: it is
-about to be part of the stack, and a stack that floats reads as a bug. And a
-**lock squares everything up**, so whatever the piece was doing on the way down,
-the board is a grid again the moment it lands.
-
-The stack falls into a cleared gap rather than teleporting into it. The board
-collapses logically at once and the picture catches up over 110 ms: a block is
-drawn as many rows above where it now sits as there were cleared rows beneath
-it, scaled by how far the collapse has left to go. A hard drop leaves a wake in
-the piece's own colour from the top of the fall to the bottom, brightest where
-the piece was longest ago.
-
-And the handling was slow. DAS was 133 ms, which is long enough to read as the
-game not listening; it is 100. The soft-drop floor was 25 ms a row and is 15.
-
-## The edge of the field
-
-The frame used to carry the hazard: warm where the walls kill, cool where they
-are furniture. That idea produced first a red rail and then an amber one, and
-both were the ugliest thing on the screen — which is the tell that the idea was
-wrong rather than the colours. A boundary is not the place to say what a
-boundary does. The wall warning already says it, locally, at the moment it
-matters and in the direction it matters, which is everything a resting colour
-cannot do.
-
-So the rail is only an edge. Snake's is cool white, because its body already
-runs cyan to magenta and its morsel is green, and there is no hot hue left that
-would not be competing with the game inside it.
-
-The shape took two goes as well. It was a hairline with two sub-pixels of
-overshoot poking out of each corner. The overshoot was meant to read as a bezel
-and read as whiskers, and one sub-pixel under this much bloom is a fuzzy line
-rather than an edge.
-
-It is two rules now — a bright inner one that is the actual edge of the field,
-and a dim outer one half a step away. One line reads as a hairline someone
-forgot to finish; two read as a rail with a shadow under it. The corners are
-made of the same rule, run brighter and a little way along both edges, so
-nothing sticks out of the rectangle at all.
-
-Nothing on it is brighter than the game inside it, either. A frame that
-outshines the playfield is a picture frame, and the only time it is allowed to
-be the brightest thing is the moment it flares for a clear or a crash.
-
-The layout reserves the depth. An arena pushed against the frame edge would
-otherwise lose one of the two rules down that side, which is the sort of thing
-that only shows up at one terminal size and is then very hard to unsee.
-
-An apple inverts the *inside* of the arena for three frames. The border and the
-strip holding still is what makes it read as the field firing rather than the
-monitor glitching — which is also why an ordinary apple gets that rather than
-one of the full-screen reactions.
-
-## Snake glides
-
-The reference for game feel is `blipscreen`'s snake, and the thing it does that
-matters is that the body does not teleport. The logic moves in whole cells, but
-every segment is drawn part of the way between where it was and where it is, on
-an eased move budget.
-
-The drawn body deliberately trails the logical one by one cell. That lag *is*
-the animation. Collision, self-intersection and apple placement only ever look
-at the logical cells; the interpolation exists strictly between the grid and the
-screen.
-
-A snake that jumps a cell at a time reads as a cursor. The same snake sliding
-the same distance reads as an animal, and it is the same game underneath.
-
-## Balance
-
-Both games are tuned against `blipscreen`'s, which is the version that felt
-right, and the numbers were diffed rather than guessed. Where they differ now it
-is deliberate.
-
-**Snake.** The speed curve is the reference's exactly: six tiers three apples
-apart, 150 ms a cell down to 75 ms, reached around the fifteenth apple. What had
-drifted was everything around it.
-
-The field was 20×20. A square arena leaves the player equidistant from
-everything and the game loses its rhythm — long runs into tight corners is what
-snake *is*. It is 26×14 now, about twice as wide as it is tall, which is both
-the shape the game has always been played on and the shape of a terminal.
-
-The bonus apple used to grow the snake by three cells. The bonus is already the
-risk of crossing the field for it under a clock; charging extra length on top
-makes taking it a punishment for succeeding. It grows by one, like any apple.
-
-Its clock was six seconds and the streak window was 3.2, both of which made the
-game slack. They are 3.5 and 2.5, which puts them either side of a line worth
-being precise about:
-
-| | tier 0 | tier 5 |
-|---|---:|---:|
-| average apple | 2.0 s | 1.0 s |
-| far corner | 5.7 s | 2.9 s |
-| streak window | 2.5 s | 2.5 s |
-
-The average apple is inside the window and the far corner is outside it, at
-every tier. That is the whole tension: if every apple chained the multiplier
-would be free, and if none did it would be decoration. And because the window
-does not shrink as the snake speeds up, chaining gets *easier* the further you
-get — which is the reward for surviving the climb. Tests assert both halves.
-
-**Tetris** had a real bug rather than a drift. The Guideline gravity curve is
-exponential and has no floor, and this machine hands out a level on the clock
-whether or not anyone is clearing lines. Carried three minutes it passed twenty
-rows a frame, so a long build ended in a board nobody could have played.
-
-The shape was wrong as well as unbounded. The Guideline curve is built for a
-marathon — gentle for a long time and then a wall — and this is two minutes
-while a build runs. It opened too slowly to be interesting and arrived at
-something unplayable with very little in between, which is exactly what "too
-easy at the start and too hard too soon" describes.
-
-It is a geometric fall now: 300 ms at the opening, giving up a fixed share of
-what is left every level, settling at 100 ms. The early steps are large and
-felt, the late ones are small, and the end is somewhere a person can keep
-playing — so dying is something the player did rather than something the clock
-did. A grounded piece still keeps its full 500 ms lock window on top of that.
-
-## Things come apart
-
-When something is destroyed on this machine it comes apart rather than
-disappearing. A row that vanishes was never there; a row that blows out across
-the well was something you did.
-
-`world::spark` is a small particle system both games emit into. Sparks live in
-*arena cells* — the coordinates the games already think in — so a game emits at
-the cell where a thing happened and never has to know how big a cell currently
-is on screen. They are drawn emissive only, so debris never occludes the game
-under it and always blooms, for the same reason the warp field is.
-
-Three emitters, because three things happen:
-
-- **`shear`** — a row opening outward, hardest at the edges, so a clear reads as
-  the line being forced apart rather than as confetti.
-- **`burst`** — a cell blown up: an apple taken, a segment of a dead snake.
-- **`glimmer`** — light rather than matter. It rises and does not fall, which is
-  what a bonus paying out looks like.
-
-There is no pool and no fixed buffer. The cap is a count and the oldest go
-first, which is both simpler than a pool and the behaviour you want: the sparks
-that matter are the ones that just left.
-
-## Nothing on screen sits still
-
-The screen is deliberately sparse, and the price of sparse is that whatever is
-left had better be alive. Every element that survived the cut moves:
-
-- **The arena frame is a marquee.** Four lights with long tails run its
-  perimeter, faster the better the player is doing — the same thing the warp
-  field says, said again where the eye already is. It was the one element that
-  would otherwise never have moved, and a bright dot travelling a border at this
-  resolution is a flicker, so they are comets rather than bulbs.
-- **A lock is absorbed.** The block a piece comes to rest on flattens for a
-  tenth of a second and springs back. Only the top of each column does it, or
-  the whole well would breathe.
-- **The queue is a conveyor.** Take a piece off the front and the rest slide up
-  into the gap while the new one fades in at the bottom, rather than the whole
-  list being rewritten in a frame.
-- **The snake pulses** head to tail. It is the one thing always on screen, and a
-  rope that only moves when the snake does is a rope nobody looks at twice.
-- **The score lifts when it moves.** It is the number the whole machine is
-  about; one that only ever sits there is one nobody watches change.
-- **A high stack is felt before it is counted.** Nothing says "you are about to
-  lose" in words. The frame pulls off its own colour toward the hazard, pulses,
-  and runs its lights faster — a piece or two before you would have noticed the
-  height yourself.
-- **The tube bends as it comes back.** Every screen change opens on a picture
-  still wobbling and settling, the way a real one did after a degauss.
-- **The marquee breathes.** A wordmark perfectly still on an otherwise moving
-  screen is the single thing that reads as a screenshot.
-
-What went, to pay for it: the hairline under every column label, which was
-drawing furniture; snake's apple count, which was the score by another name; and
-tetris's LINES and LEVEL, which moved to the game-over screen. They are what you
-read *after* a run rather than what you play with, and keeping them out of the
-column is most of what makes the game screen quiet enough to play on.
-
-Three ways to move, because the machine has no idea whose hands are on it:
-arrows, vim, and the left-hand grip everyone who has ever played anything
-already has.
-
-## Putting a coin in
-
-Between pressing a key and playing there used to be a 950 ms wheel, shortened on
-the principle that everything before the game is dead time. That principle is
-right everywhere except here. A cabinet that started the instant you touched it
-never felt like it had *accepted* anything, and the half-second of the machine
-noticing is most of why putting a coin in was worth doing.
-
-It is three beats now, about two and a quarter seconds end to end:
-
-1. **The credit.** The marquee stays up, dimmed, and `CREDIT 01` lands on it
-   behind a ring going out from the middle. Nothing has been shown yet — but
-   the wheel is already decided, so the screen is holding an answer it has not
-   given. Re-rolling after the ceremony would be a different game.
-2. **The wheel**, 1.35 s, eased out to the fifth power. What matters is not the
-   duration but that the last few slots crawl past slowly enough to read. A
-   wheel that decelerates evenly is a fade with extra steps.
-3. **The hold.** The winner sits for 0.42 s before the cut, and for the first
-   frames of it the name is drawn a second time a step off itself. Two frames of
-   double image is what a thing arriving hard looks like when the face cannot
-   actually be scaled.
-
-The landing strobe hits, flips, hits again and rings down — a detent catching
-rather than a light coming on.
-
-A test pins the total between 1.8 and 2.8 seconds. Under that it does not read
-as a ceremony; over it, it is a loading screen you have to sit through twice.
-
-## The loud moments
-
-A reaction is written as data — a list of beats, one per render frame — rather
-than as code, because the only way to tune a strobe is to read it as a rhythm.
-`on, off, on, off` is legible; the same pattern spread across branches is not.
-
-```rust
-pub const HUGE: &[Beat] = &[
-    beat(1.0, 0.3, 0.0),   // invert, wash, tear
-    beat(0.0, 0.9, 6.0),
-    beat(1.0, 0.0, 4.0),
-    ...
-];
-```
-
-Games never name a pattern. They name an *event* — `Kick::Small`, `Big`,
-`Huge`, `Bonus`, `Death` — and the shell decides how loud the screen gets, which
-is what stops two games reacting differently to the same kind of thing. A
-louder reaction displaces a quieter one that is already playing rather than
-queueing behind it: by the time a queued strobe played, whatever asked for it
-would be long over.
-
-Two rules hold for every pattern, and are tested. It ends dark, or the frame
-after it inherits whatever the pattern was doing. And it is at most twelve
-frames, because a strobe that outlasts the thing it is reacting to stops being
-an impact and becomes a fault.
-
-What is deliberately quiet: an ordinary apple. One arrives every second or two,
-and a screen that flashes that often is a screen nobody looks at. It has the
-hitstop, the marker and the frame flare already — the noise is being saved for
-the golden one.
-
-These are the most expensive frames the machine can draw, because a full-screen
-invert repaints every cell. On a metered link a pattern keeps its opening hit
-and loses its tail. Suppressing the inverts and keeping only the washes was
-tried first, on the theory that a wash over black falls under a loose tolerance
-and is nearly free; measured, it saved five per cent and cost most of the punch,
-so the length of the pattern is the dial and the flip stays.
-
-## The monitor
-
-`world::crt` is the last pass, and everything in it is an artefact of a real
-cathode-ray tube rather than a filter someone liked:
-
-- **vignette** — the corners of a tube fall away. Cheapest pass, does the most.
-- **fringe** — three guns never landed on the same spot, and the misconvergence
-  grew toward the edges, which is why it scales with distance from the centre.
-- **hum** — a band of lifted brightness crawling down the picture, mains
-  frequency beating against the frame rate. The single artefact that most
-  reliably says "this is not a still image".
-- **shake** — the chassis, not the arena. Games already shake their own field.
-- **tear** — lost horizontal hold, in bands rather than rows. Per-row offsets
-  read as noise; a band of rows moving together reads as the picture slipping.
-- **collapse** — cut the power and the raster squeezes to a line and then to a
-  dot, brightening as its energy packs into fewer rows.
-
-That last one is why every screen change in the machine is a cut. The tube
-collapses, the mode swaps behind the dark, and it opens on the next screen. The
-exception is the crash: the death, the dissolve and the settle are one
-continuous thing, and cutting away from it would throw out the part worth
-watching. `Machine::go` cuts, `Machine::slide` does not.
-
-Ordering in the chain is not arbitrary. The flash is light arriving at the
-glass, so it is first. The guns are behind the glass, so the fringe is next. Hum
-and vignette are properties of the tube. The shake moves the whole chassis. The
-collapse is the power going, and it happens to whatever the screen was showing.
-
-## One row of chrome
-
-The play screen carried a bar across the top with a `1UP` marker, the live
-score, the game's name and the all-time best; a second row under the well for
-readings; and a third at the bottom for the wrapped command. Three rows of
-furniture around a game is a dashboard.
-
-Every one of those had an answer. The marker says nothing. The name is answered
-by looking at the game. The record belongs on the screen where records are read,
-which is the attract loop and the board. And the readings the player is not
-using while playing belong on the screen they read afterwards.
-
-So there is one row now, at the bottom: the score at the left in white, whatever
-the game has to shout beside it, the command's last line dim after that, and the
-clock at the right. The standalone arcade says nothing at all there — a line of
-instructions along the bottom of a game is read once and then in the way
-forever.
-
-What still touches the well is what you play with: the hold slot, the queue, and
-snake's multiplier.
+reached for this is that you did not want to decide anything. A reel picks,
+and picks again after every death. The rotation is not a feature bolted on
+top; it is the product.
+
+**Nothing may cost you your command.** stdout belongs to the child, always.
+The exit code is the child's. If the command fails, its stderr is replayed
+rather than swallowed by the alternate screen. With no terminal at all it runs
+the command and gets out of the way rather than refusing. Even a panic in the
+arcade is caught, the terminal restored, and the wait resumed — a toy that
+eats your build the day it has a bug is not a toy you keep installed.
+
+## One picture
+
+The screen is 80×48 one-bit pixels. Every pixel is either lit phosphor or
+dark glass. The picture is blown up in whole pixels to whatever the terminal
+is and centred on black, and at scale one it is exactly an 80×24 terminal —
+the size every terminal has been since terminals.
+
+This is the structural decision everything else hangs off, and it was learned
+the hard way. Two earlier machines lived in this repository. The first was a
+synthwave landscape with the game cut into it — a picture with a game on it,
+which is a 2015 album cover rather than an arcade machine. The second kept
+the black and built an adaptive cabinet: a layout solver that reflowed an
+arena, side columns and a status strip from `(width, height)`, full colour,
+bloom, dithering, a warp field, a CRT filter chain. It was technically
+impressive and it played safe and it looked like a dashboard, and every third
+bug in the tracker was the solver being caught out by a size nobody had tried
+— edges that clipped, fields a resize could strand, states you could see but
+not play.
+
+A fixed canvas deletes that entire class of problem *by construction*. There
+is no layout to solve, so there is no layout to get wrong. A resize changes
+one integer. Every coordinate in the machine is a hand-placed constant that
+someone looked at, which is the only way "every detail right" is even a
+claim that can be checked. And one bit per pixel deletes the palette the same
+way: there is no contrast to manage, no "does this read against that" branch,
+no colour that needs a fallback. Ink is legible everywhere, because ink is
+the only thing there is.
+
+The cost is honest: margins on terminals between whole scales, and a hard
+floor of 80×24. Fractional scaling was rejected on sight — one source pixel
+two columns wide next to one a single column wide stops being pixel art and
+starts being mangled art.
+
+## One voice
+
+All the colour lives in a single value, the `Phosphor`: the tone lit pixels
+glow with, and the tint that tone leaves in the glass around them. That pair
+is the machine's whole emotional range, and it is played loudly precisely
+because it is one channel:
+
+- each game owns a tone — lime for SNAKE, ice for BLOCKS — so what you are
+  playing is said before a word is read
+- heat pushes the tone towards gold: play well and the screen itself warms
+- the reel strobes neon while it flies, because it is the one screen with no
+  game on it to protect
+- a landing, a golden apple, a tetris blow the tube out white for a beat
+- death flares alarm red; a record turns the whole panel gold
+
+A screen with six colour systems has to whisper with all of them. A screen
+with one can shout.
+
+## The glass
+
+What makes it a monitor rather than a bitmap is applied on the way out, in
+the composer, and there are exactly four effects:
+
+- **halo** — an unlit pixel next to a lit one picks up a faint wash of the
+  tone. This is the phosphor bleeding into the glass, and it is the single
+  pass that makes the picture read as *lit* rather than drawn.
+- **scanlines** — alternate terminal rows dim the phosphor a shade. On dark
+  glass it has to be the ink that dims; dimming the dark would be invisible.
+- **shake** — on a hit, rows shear in opposite directions by up to two cells.
+  The picture is not displaced, it is *struck*.
+- **collapse** — between screens the raster squeezes to a bright line and
+  the line to a dot, burning brighter as it narrows because the same beam is
+  being spent on fewer lines. Every screen change is one of these closing
+  and the next one opening. The one exception is death: the settle after a
+  crash is continuous with the game that produced it, so it slides.
+
+Everything else the old machine had — bloom in linear light, ordered
+dithering, chromatic fringe, supply hum, vignette, a warp field, a particle
+system — is gone. Each was defensible alone; together they were a mood board
+sitting between the player and the game.
+
+## Three screens
+
+The shell is a loop over three modes, and none of them asks a question.
+
+**The reel.** Game names on a strip turning behind a lit window, sliced off
+mid-letter at the lip, with a sprung-pawl settle when it lands — it overshoots
+its detent and rocks back, because a thing stopped by a pawl was visibly
+moving under its own weight. Any key brakes it hard: the spin is a thrill,
+not a wait. The whole throw is spent in about 700 ms. Once landed it holds
+just long enough to read the winner's one line of controls, then cuts in.
+
+**The game.** The entire canvas belongs to it. Score in the 3×5 face, the
+field, and nothing else standing.
+
+**The settle.** GAME OVER, the score, the best, and a bar draining towards
+the next spin — the wait reads as the machine reloading, not as the game
+having stopped. A grace period ignores the keys you were still mashing when
+you died; after it, any key spins immediately. There is no "play again": the
+next game is a different game, because that is the premise.
+
+There is no attract mode, no help screen, no score board, no pause. Each was
+built, and each was cut in the rebuild for the same reason: it was a screen
+the player had to be *somewhere else* to be on. The machine teaches the way a
+cabinet taught — one hint line on the reel, and dying.
+
+## Feel is shared
+
+Both games speak the same physical language, and the shell enforces it by
+owning the vocabulary:
+
+- **hitstop** — an impact freezes the whole machine for a few render frames.
+  An apple is a tap (3), a golden one a hit (6), a death the full 150 ms the
+  eye needs to read an impact as one (10). Time does not accumulate during
+  the freeze; it is a debt paid in frames, not wall time owed afterwards.
+- **shake** is derived from hitstop, so nothing can shake without having
+  stopped time first — a shake without weight is a shiver.
+- **the flash** is banked by the game (`take_flash`) and spent by the shell
+  on the phosphor, so both games are loud through the same lamp. It is
+  rationed deliberately: an ordinary apple arrives every second or two, and
+  a screen that blows out that often is a screen nobody looks at.
+- **markers** — `+N` rises off the cell that earned it, in the same face at
+  the same rate, in both games.
+- **local flashes stay local** — snake's eat inverts the field interior while
+  the border holds still, which is what makes the field itself look like it
+  fired; blocks' cleared rows blink in place while their window runs down.
+
+## The snake glides
+
+The one thing that makes a snake a snake rather than a cursor: the logic
+moves in whole cells, but every segment is drawn part of the way between
+where it was and where it is, on a mild ease-out — ahead of linear the whole
+way but never past the cell, because a full ease leaves the head visibly
+drifting into a cell it has already logically reached. Each segment
+interpolates from *its own* previous position, so the whole body slides along
+its own path and corners stay corners. Death freezes the glide at the far
+end: a snake still coasting into its last cell reads as if the collision had
+not landed.
+
+## Steering is taps, never state
+
+The input layer hands games two different things and the distinction is the
+fix for the worst bug the machine ever shipped:
+
+- **held state** (four booleans) — what an auto-shift wants. Blocks' DAS
+  charges against it in real milliseconds.
+- **taps** (direction presses, in arrival order) — what a steering wheel
+  wants. The snake reads only these.
+
+Steering by held state fails two ways at once: held booleans have no order,
+so two keys rolled around a corner collapse into whichever the code checks
+first; and a key still held from three cells ago outvotes the tap that was
+meant to turn, which is exactly the moment the player calls the game
+unresponsive. A tap is queued once, validated against the last queued turn
+(a reversal into your own neck is always a misfire, so it is refused rather
+than allowed to kill), and three can be banked — enough for a double corner
+between moves without the snake driving itself.
+
+Where the terminal supports the kitty keyboard protocol, releases are real
+and held state is exact. Where it does not, a key is assumed held for 60 ms
+after its last event — deliberately shorter than DAS, so a tap can never
+start an auto-shift on such a terminal.
+
+## Balance is asserted, not remembered
+
+Every tuning claim that matters is a test, because a claim in a comment
+drifts and a claim in an assertion cannot:
+
+- snake's average apple is chainable and the far corner is not, at every
+  tier — that is the whole tension of the multiplier
+- the golden apple is reachable on average and not from the far corner: a
+  decision, not a collection
+- chaining gets easier as the snake speeds up, which is the reward for
+  surviving the climb
+- blocks' gravity opens between 0.25 and 0.35 seconds a row, only tightens,
+  bites within two minutes, and floors where a piece still takes two seconds
+  to cross the well — three minutes in, it is still a game and not a countdown
+- the reel's whole ceremony fits between "long enough to read as a gamble"
+  and "short enough to sit through twice"
+
+And one test simply mashes: every game, thousands of steps of random input,
+stepped well past death, in a debug build so overflow panics too. It proves
+nothing about correctness. It exists because "it crashed while I was playing"
+is the one bug report that must never be true.
 
 ## What a frame costs
 
-Every pass in the chain costs bytes on a wire, not just cycles, and on a phone
-over cellular that is the whole bill. `adhd --bench` encodes three hundred
-frames of real play and counts the diff. On a 120×34 frame:
-
-| | bytes/frame | KB/s at 60 |
-|---|---:|---:|
-| full | 8503 | 498 |
-| full, no warp field | 595 | 35 |
-| full, no hum | 8299 | 486 |
-| full, no fringe | 8503 | 498 |
-| full, tolerance 14 | 1821 | 107 |
-| lean | 1792 | 105 |
-
-The result is not what it looks like from the code. The CRT passes are nearly
-free — the hum costs two hundred bytes a frame and the fringe measures as zero,
-because it only rewrites cells that were already being re-sent. **The warp field
-is ninety-three per cent of the traffic**, and not because it is large: it is
-faint, and bloom spreads that faintness across almost every cell, and a
-two-level colour-match tolerance calls almost every one of those a change.
-
-So the fix is not to delete the field. It is to stop re-sending changes nobody
-can see: at tolerance 14 the same picture costs a fifth. That, half the frame
-rate, and dropping the two passes that dirty cells nothing asked to change is
-what `--lean` is, and it is the default whenever `SSH_CONNECTION` is set.
-
-Measured end to end through a pty: 601 KB/s local, 90 KB/s over SSH.
-
-A cell costs up to forty bytes — two truecolor SGRs and a three-byte glyph — so
-a full repaint of that frame is 159 KB. Everything above is the diff doing its
-job; the question was only ever how much of the frame it decides has changed.
-
-## Things that were deliberately not done
-
-- **A third game.** Two games done properly beat three done adequately, and the
-  rotation reads as variety at two.
-- **Configurable keybindings.** A TOML file is a decision, and see the premise.
-- **A menu, difficulty select, or game modes.** Same reason.
-- **Screen curvature.** It is the one CRT artefact that would have to resample
-  text, and text that wobbles is not authenticity, it is a bug.
-- **Letting the player replay the same game.** Tempting, and rejected: the
-  moment you can choose, the machine is a menu with extra steps.
-- **A wide tetris well.** Ten by twenty with square minos is twice as tall as
-  it is wide, and that *is* the game — stretching it to fill a wide terminal
-  would make it a different one. A tetris cabinet solved this by standing its
-  monitor on end, and there is no equivalent of that here. So the well is as
-  large as the height allows and the flanks stay black.
+The renderer diffs against the previous frame and repaints only cells that
+changed, bracketed in DEC 2026 synchronized output so a burst lands at once
+instead of tearing. A one-bit picture in flat tones makes the diff small by
+nature — a moving snake is a few dozen cells — and the loud moments that
+repaint everything are exactly the moments that are worth their bytes. Over
+SSH the frame rate halves (30 instead of 60), which is most of the saving
+with none of the picture gone; the old machine needed a whole quality tier,
+a tolerance knob and a bench harness to get its wire cost down, and the new
+picture gets further by simply having less picture.
 
 ## Adding a game
 
-One `games::Kind` variant and one module. `Kind` carries the arena size, the
-marquee name, the slug its scores are filed under, the frame hue, the control
-hint and how to spawn it; the module implements `games::Game`. Everything else
-— layout, columns, hitstop, pops, the wheel, the board — already works.
+One `Kind` variant and one module implementing `Game`: step it with input and
+a `dt`, say when it is over, bank hitstop and flash, draw yourself onto the
+canvas, and provide an autopilot good enough to watch — it is the proof the
+game is playable, and what `--shot` photographs. The reel, the scores, the
+phosphor and the settle come for free. The autopilot is not optional.
 
-The autopilot is not optional in practice. The attract screen is the machine
-playing itself, and a game without one shows a still frame on the marquee.
+## Things deliberately not done
+
+- **No pause.** A run is under two minutes and the machine respins anyway;
+  a pause is a menu in disguise.
+- **No `q` to quit.** It sits under the same hand as the movement keys and
+  quitting is the one action with no undo. Esc leaves the game for the reel,
+  and the reel for the shell — one key never drops the session by surprise,
+  and two always do.
+- **No score board screen.** Ten scores per game are still kept on disk;
+  the screen that showed them was a screen nobody was on. BEST on the reel
+  and NEW BEST! on the settle carry what the player actually feels.
+- **No ticker of the command's output.** It made the picture a dashboard.
+  The command gets a hairline of progress across the top of the picture, and
+  its stderr tail replayed on failure — the signal without the stream.
+- **No fractional scaling, no adaptive layout.** See "One picture". The
+  margin is the price of never again shipping a screen nobody had tried.
