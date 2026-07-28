@@ -348,16 +348,16 @@ right everywhere except here. A cabinet that started the instant you touched it
 never felt like it had *accepted* anything, and the half-second of the machine
 noticing is most of why putting a coin in was worth doing.
 
-It is three beats now, about two and a quarter seconds end to end:
+It is three beats now, about a second and two thirds end to end:
 
 1. **The credit.** The marquee stays up, dimmed, and `CREDIT 01` lands on it
    behind a ring going out from the middle. Nothing has been shown yet — but
    the wheel is already decided, so the screen is holding an answer it has not
    given. Re-rolling after the ceremony would be a different game.
-2. **The wheel**, 1.35 s, eased out to the fifth power. What matters is not the
+2. **The wheel**, 0.95 s, eased out to the fifth power. What matters is not the
    duration but that the last few slots crawl past slowly enough to read. A
    wheel that decelerates evenly is a fade with extra steps.
-3. **The hold.** The winner sits for 0.42 s before the cut, and for the first
+3. **The hold.** The winner sits for 0.3 s before the cut, and for the first
    frames of it the name is drawn a second time a step off itself. Two frames of
    double image is what a thing arriving hard looks like when the face cannot
    actually be scaled.
@@ -365,8 +365,11 @@ It is three beats now, about two and a quarter seconds end to end:
 The landing strobe hits, flips, hits again and rings down — a detent catching
 rather than a light coming on.
 
-A test pins the total between 1.8 and 2.8 seconds. Under that it does not read
-as a ceremony; over it, it is a loading screen you have to sit through twice.
+A test pins the total between 1.2 and 2.0 seconds. Under that it does not read
+as a ceremony; over it, it is a wait — and it is paid on every single death,
+which is why the first tuning at two and a half turned out to be a quarter of
+a session spent ceremonising. A wrapped command's autostart skips the coin
+entirely: nobody put one in.
 
 ## The loud moments
 

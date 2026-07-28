@@ -34,7 +34,7 @@ The wheel picks. Names fly through the warp toward you, the wheel fights to a
 stop, the screen flashes white, and you are playing.
 
 When you die it shows you the run, shows you where it placed on the board, and
-spins again — for a different game. The whole ceremony is under four seconds,
+spins again — for a different game. The whole ceremony is about two seconds,
 because it is time you are not playing in.
 
 That is the whole design. You sat down to wait for a build, not to run a menu,
@@ -134,7 +134,7 @@ repaint or corrupt the screen.
 | `p` | pause — the picture is held, not lost |
 | `?` | the controls, on their own screen |
 | any key | skip the ceremony after a run |
-| `esc` | leave the game; again to quit |
+| `esc` or `ctrl-c` | leave the game; again to quit |
 
 ## Over SSH, and on a phone
 
@@ -148,8 +148,8 @@ every frame.
 told; `--rich` forces the full renderer back on.
 
 ```
-~180 KB/s   local, full, 60 fps
- ~70 KB/s   over SSH, lean, 30 fps
+~250 KB/s   local, full, 60 fps — locally this is a memcpy
+ ~30 KB/s   over SSH: lean speaks xterm-256 at 30 fps
 ```
 
 It needs 60×24, so a terminal app in landscape is comfortable and portrait

@@ -220,8 +220,20 @@ pub fn enc_diff(
     let mut cur_fg_i: Option<u8> = None;
     let mut cur_bg_i: Option<u8> = None;
 
+    // In palette mode a cell is unchanged when its *emitted* colours are —
+    // two truecolor values that quantise to the same xterm-256 index paint
+    // the same ink, and repainting them was most of lean's remaining bytes
+    // once the finer posterize let more sub-visible drift through.
     let same = |a: &Cell, b: &Cell| -> bool {
-        a.half == b.half && near(a.bg, b.bg, tol) && (!a.half || near(a.fg, b.fg, tol))
+        if a.half != b.half {
+            return false;
+        }
+        if palette {
+            srgb_to_256(a.bg) == srgb_to_256(b.bg)
+                && (!a.half || srgb_to_256(a.fg) == srgb_to_256(b.fg))
+        } else {
+            near(a.bg, b.bg, tol) && (!a.half || near(a.fg, b.fg, tol))
+        }
     };
 
     for y in 0..h {
