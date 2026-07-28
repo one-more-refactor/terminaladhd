@@ -32,34 +32,34 @@ const MAX_STEPS: u32 = 8;
 /// How long the attract screen holds before a wrapped command spins the wheel
 /// on its own. Long enough to read the marquee, short enough that it is not in
 /// the way of the thing you actually started.
-const AUTOSTART: Duration = Duration::from_millis(700);
+const AUTOSTART: Duration = Duration::from_millis(400);
 
 /// How long a credit takes to go in. The one piece of dead time on this machine
 /// that is worth having: a cabinet that started the instant you touched it
 /// never felt like it had accepted anything.
-const COIN_TIME: f32 = 0.55;
+const COIN_TIME: f32 = 0.40;
 
 /// How long the wheel turns, how long the winner is held after it stops, and
 /// how many slots it travels.
-const SPIN_TIME: Duration = Duration::from_millis(1350);
-const SPIN_HOLD: f32 = 0.42;
+const SPIN_TIME: Duration = Duration::from_millis(950);
+const SPIN_HOLD: f32 = 0.30;
 const SPIN_SLOTS: usize = 9;
 
 /// The settle after a crash: how long the picture takes to go down, how long
 /// the score counter takes to climb, and how long the whole thing is held.
 const SINK_TIME: f32 = 0.35;
 const COUNT_TIME: f32 = 0.45;
-const OVER_TIME: f32 = 1.4;
+const OVER_TIME: f32 = 1.0;
 /// A record is worth looking at for longer than a bad run.
-const OVER_TIME_RECORD: f32 = 2.2;
+const OVER_TIME_RECORD: f32 = 1.6;
 
 /// How long the board stays up before the wheel turns again.
-const BOARD_TIME: f32 = 2.0;
+const BOARD_TIME: f32 = 1.2;
 
 /// How long the tube takes to cut out and to come back. Short: this is a cut
 /// between two things, not a scene of its own.
-const CUT_OUT: f32 = 0.16;
-const CUT_IN: f32 = 0.24;
+const CUT_OUT: f32 = 0.10;
+const CUT_IN: f32 = 0.15;
 
 /// Impact past which the monitor itself is felt — the guns pull apart and the
 /// chassis moves, rather than only the arena shaking.
@@ -303,7 +303,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
                 // the window returns.
                 prev.fill(UNPAINTED);
             }
-            std::thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
+            pad.wait(frame_time.saturating_sub(frame_start.elapsed()));
             continue;
         }
         if small_said {
@@ -528,7 +528,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
         // on screen forever.
         presenter.frame(&stage.cells, &mut prev, stage.w, stage.h)?;
 
-        std::thread::sleep(frame_time.saturating_sub(frame_start.elapsed()));
+        pad.wait(frame_time.saturating_sub(frame_start.elapsed()));
     };
 
     term::drain();
@@ -891,12 +891,14 @@ mod tests {
 
     #[test]
     fn the_ceremony_is_long_enough_to_be_one_and_short_enough_to_forgive() {
-        // Everything between pressing a key and playing is dead time, and this
-        // is the one stretch of it worth having. Two and a half seconds is a
-        // cabinet accepting a coin; five is a loading screen.
+        // Everything between pressing a key and playing is dead time, and
+        // this is the one stretch of it worth having — but it is sat through
+        // on every single death, and at the old timings the machine spent
+        // more of a session ceremonising than playing. Under a second and a
+        // half still reads as a ceremony; over two reads as a wait.
         let total = COIN_TIME + SPIN_TIME.as_secs_f32() + SPIN_HOLD;
-        assert!(total > 1.8, "too quick to read as a ceremony: {total}");
-        assert!(total < 2.8, "too long to sit through twice: {total}");
+        assert!(total > 1.2, "too quick to read as a ceremony: {total}");
+        assert!(total < 2.0, "too long to sit through twice: {total}");
     }
 
     #[test]

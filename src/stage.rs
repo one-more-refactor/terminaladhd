@@ -33,7 +33,10 @@ const BLOOM: (usize, usize, f32) = (2, 1, 0.32);
 const SCANLINE: f32 = 0.80;
 /// Levels per channel after the post pass. Eight is enough that the hot hues
 /// keep their identity and few enough that every gradient visibly steps.
-const POSTER_LEVELS: f32 = 8.0;
+// Fourteen: at eight the bands around every moving glow crawled visibly,
+// which read as a rendering bug and wore the eyes out. Fourteen keeps the
+// flat retro read and the rings stop shimmering.
+const POSTER_LEVELS: f32 = 14.0;
 /// Colour-match tolerance when resolving sub-pixels to cells and when diffing
 /// them against the last frame, in 8-bit levels.
 ///
@@ -222,13 +225,14 @@ const REST: Beat = beat(0.0, 0.0, 0.0);
 pub mod strobe {
     use super::{beat, Beat, REST};
 
-    /// A single or a double. Enough to feel, gone before the next piece.
-    pub const CLEAR: &[Beat] = &[beat(0.0, 0.55, 0.0), beat(0.0, 0.18, 0.0), REST];
+    /// A single or a double. A pulse, not a blowout: this fires every few
+    /// seconds of decent play, and a screen that whites out that often is a
+    /// screen that hurts to watch.
+    pub const CLEAR: &[Beat] = &[beat(0.0, 0.30, 0.0), beat(0.0, 0.10, 0.0), REST];
 
     /// A triple, or a spin that cleared. One flip of the picture.
     pub const BIG: &[Beat] = &[
-        beat(1.0, 0.0, 0.0),
-        beat(0.0, 0.7, 3.0),
+        beat(0.0, 0.55, 3.0),
         beat(0.9, 0.0, 0.0),
         beat(0.0, 0.25, 0.0),
         REST,
@@ -241,7 +245,6 @@ pub mod strobe {
         beat(0.0, 0.9, 6.0),
         beat(1.0, 0.0, 4.0),
         beat(0.0, 0.6, 8.0),
-        beat(1.0, 0.0, 3.0),
         beat(0.0, 0.35, 0.0),
         beat(0.0, 0.15, 0.0),
         REST,
@@ -250,9 +253,9 @@ pub mod strobe {
     /// A bonus taken. Bright and warm rather than inverted: the picture is not
     /// being interrupted, it is being paid.
     pub const BONUS: &[Beat] = &[
-        beat(0.0, 0.9, 0.0),
-        beat(0.0, 0.35, 0.0),
         beat(0.0, 0.7, 0.0),
+        beat(0.0, 0.30, 0.0),
+        beat(0.0, 0.5, 0.0),
         beat(0.0, 0.2, 0.0),
         REST,
     ];
@@ -273,15 +276,15 @@ pub mod strobe {
     /// The wheel stopping. It hits, flips, hits again and rings down — a detent
     /// catching rather than a light coming on.
     pub const LAND: &[Beat] = &[
-        beat(0.0, 1.5, 0.0),
+        beat(0.0, 0.9, 0.0),
         beat(1.0, 0.0, 6.0),
-        beat(0.0, 1.0, 4.0),
+        beat(0.0, 0.6, 4.0),
         REST,
-        beat(0.0, 0.7, 3.0),
+        beat(0.0, 0.4, 3.0),
         REST,
-        beat(0.0, 0.4, 0.0),
+        beat(0.0, 0.25, 0.0),
         REST,
-        beat(0.0, 0.2, 0.0),
+        beat(0.0, 0.12, 0.0),
         REST,
     ];
 
@@ -289,7 +292,7 @@ pub mod strobe {
     /// the tail, because a credit is the machine waking up rather than
     /// something happening to it.
     pub const COIN: &[Beat] = &[
-        beat(0.0, 1.3, 0.0),
+        beat(0.0, 0.9, 0.0),
         beat(0.0, 0.5, 5.0),
         beat(1.0, 0.0, 0.0),
         beat(0.0, 0.7, 3.0),
@@ -317,7 +320,10 @@ pub mod strobe {
 
 /// The permanent misconvergence, in sub-pixels at the frame edge. Under one
 /// sub-pixel: not seen, only felt.
-const FRINGE_REST: f32 = 0.45;
+// Zero at rest: a permanent misconvergence doubles every edge on screen,
+// which is exactly the thing that makes eyes ache after a minute. The guns
+// now only pull apart when something hits.
+const FRINGE_REST: f32 = 0.0;
 /// How strong the hum bar is, and how long it takes to cross the picture.
 const HUM_STRENGTH: f32 = 0.055;
 const HUM_SECS: f32 = 7.5;

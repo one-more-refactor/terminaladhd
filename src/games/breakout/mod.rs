@@ -76,7 +76,7 @@ const POP_SECS: f32 = 0.8;
 /// Render frames the machine freezes for: a brick is felt only through the
 /// paddle (a court that stutters on every brick is unplayable), so the stops
 /// are the ball coming back off the paddle, a lost ball, and the wall going.
-const HITSTOP_PADDLE: u32 = 2;
+const HITSTOP_PADDLE: u32 = 1;
 const HITSTOP_LOSS: u32 = 8;
 const HITSTOP_CLEAR: u32 = 10;
 

@@ -27,7 +27,7 @@ const BIRTH: f32 = 0.06;
 
 /// Sub-pixels per second at the birth radius, and the multiple of that a streak
 /// reaches at the edge. The acceleration is what sells the perspective.
-const SPEED: f32 = 34.0;
+const SPEED: f32 = 26.0;
 const EDGE_GAIN: f32 = 6.0;
 
 /// What heat and a punch add to the speed, as multiples of the resting rate.
@@ -127,7 +127,7 @@ impl Warp {
             let col = far.lerp(near, s.r);
             // Fade in out of the vanishing point and out again at the frame
             // edge, so nothing ever pops into or out of existence.
-            let alpha = smooth_edges(s.r) * (0.14 + 0.44 * s.weight);
+            let alpha = smooth_edges(s.r) * (0.10 + 0.34 * s.weight);
             let dashes = ((len / T as f32).ceil() as i32).clamp(1, 24);
             let mut last = (i32::MIN, i32::MIN);
             for i in 0..dashes {

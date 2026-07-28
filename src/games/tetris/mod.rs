@@ -70,7 +70,7 @@ const SHAKE_DECAY_SECS: f32 = 0.30;
 /// Render frames the machine freezes for. A lock that clears nothing is worth
 /// nothing; a Tetris and a top-out are worth the 150 ms an impact wants before
 /// the eye stops reading it as one.
-const HITSTOP_CLEAR: u32 = 4;
+const HITSTOP_CLEAR: u32 = 2;
 const HITSTOP_BIG: u32 = 8;
 const HITSTOP_OVER: u32 = 10;
 
@@ -81,7 +81,10 @@ const POP_SECS: f32 = 0.8;
 /// enough that it never lags the input, long enough that the piece is seen to
 /// travel rather than to teleport — which is the whole difference between a
 /// game that feels responsive and one that feels like a spreadsheet.
-const SHIFT_GLIDE: f32 = 0.055;
+// Half of what it was: at 55 ms the piece visibly trailed the key, and a
+// screen that lags its own input reads as unresponsive no matter what the
+// timers say. At 25 ms the travel still reads and the lag does not.
+const SHIFT_GLIDE: f32 = 0.025;
 
 /// The wake a hard drop leaves: the piece, where its cells were at the top of
 /// the fall, how many rows it crossed, and how much of its life is left.

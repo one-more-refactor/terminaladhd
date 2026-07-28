@@ -476,6 +476,20 @@ impl Pad {
         Ok(p)
     }
 
+    /// Sleep out the rest of the frame, but wake the moment a key arrives.
+    /// A plain `thread::sleep` here was up to sixteen milliseconds of the
+    /// machine being deaf on every frame — the difference between an input
+    /// landing on this sim step and the next one, which is the difference
+    /// the hands actually feel. Events are left queued for the next poll;
+    /// an early wake re-renders an unchanged frame, which the diff turns
+    /// into a handful of bytes.
+    pub fn wait(&mut self, budget: Duration) {
+        if budget.is_zero() {
+            return;
+        }
+        let _ = event::poll(budget);
+    }
+
     /// Forget everything held. Used when the machine changes screens, so a
     /// direction still down when a run ends does not steer the next one.
     pub fn release_all(&mut self) {

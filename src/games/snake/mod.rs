@@ -74,8 +74,12 @@ const DEATH_SECS: f32 = 0.9;
 
 /// Render frames the machine freezes for on each event. A tap, a hit, and the
 /// 150 ms an impact wants before the eye stops reading it as one.
-const HITSTOP_APPLE: u32 = 3;
-const HITSTOP_GOLD: u32 = 6;
+// An apple is a tap, not a stop: freezing the world three frames for a thing
+// that happens every second or two read as the machine stuttering, and at
+// thirty frames it was a hundred-millisecond hitch per bite. One frame keeps
+// the touch; the freezes belong to the gold and the death.
+const HITSTOP_APPLE: u32 = 1;
+const HITSTOP_GOLD: u32 = 4;
 const HITSTOP_DEATH: u32 = 10;
 
 /// How long a `+N` marker stays in the air.
@@ -83,7 +87,7 @@ const POP_SECS: f32 = 0.8;
 
 /// Render frames the arena stays inverted after an apple. Short and local: the
 /// field fires, the rest of the machine does not move.
-const EAT_FLASH: u32 = 3;
+const EAT_FLASH: u32 = 2;
 
 /// Turns banked beyond this are dropped. Three is enough to bank a double
 /// corner between moves without the snake driving itself.
