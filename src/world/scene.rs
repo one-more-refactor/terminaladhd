@@ -208,13 +208,13 @@ pub fn chrome_word_w(text: &str, scale: usize) -> usize {
 }
 
 /// Draw `text` in the chrome face centred on sub-pixel point `(cx_px, cy_sub)`.
-/// Opaque: replaces `base`, and only the bright bands feed `emis` so the
-/// lettering blooms without the dark serifs smearing.
+///
+/// Flat: one fill and one hard offset shadow, the way a cabinet's side art
+/// was screenprinted. The airbrushed steel sweep went first to six hard
+/// bands and now to nothing at all — every step of "less gradient" made the
+/// words read better, because a wordmark is read by its shape and every
+/// colour inside the letterform fights the shape.
 pub fn chrome_word(b: &mut Buf, text: &str, scale: usize, cx_px: f32, cy_sub: f32) {
-    // Built once: the ramp is a constant, and rebuilding its stop list for
-    // every word on every frame was an allocation with no information in it.
-    static RAMP: std::sync::OnceLock<Ramp> = std::sync::OnceLock::new();
-    let ramp = RAMP.get_or_init(chrome_ramp);
     let gw = (font::W + 1) * scale;
     let n = text.chars().count();
     if n == 0 {
@@ -225,46 +225,41 @@ pub fn chrome_word(b: &mut Buf, text: &str, scale: usize, cx_px: f32, cy_sub: f3
     let gh = (font::H * scale) as f32;
     let y0 = (cy_sub - gh * 0.5).round() as i32;
 
-    for (ci, ch) in text.chars().enumerate() {
-        let g = font::glyph(ch);
-        for (gy, row) in g.iter().enumerate().take(font::H) {
-            for gx in 0..font::W {
-                if row & (1 << (font::W - 1 - gx)) == 0 {
-                    continue;
-                }
-                for sy in 0..scale {
-                    let py = y0 + (gy * scale + sy) as i32;
-                    if py < 0 || py as usize >= b.sh {
+    let fill = hex(0xDCEEFF);
+    let shadow = hex(0x7E1064);
+    let off = (scale as i32 / 2).max(1);
+
+    let mut stamp = |dx: i32, dy: i32, col: Rgb, glow: f32| {
+        for (ci, ch) in text.chars().enumerate() {
+            let g = font::glyph(ch);
+            for (gy, row) in g.iter().enumerate().take(font::H) {
+                for gx in 0..font::W {
+                    if row & (1 << (font::W - 1 - gx)) == 0 {
                         continue;
                     }
-                    let t = (gy * scale + sy) as f32 / (gh - 1.0);
-                    // Silkscreened rather than airbrushed: the same sweep, in
-                    // six flat bands with hard edges. The gleam line survives
-                    // as its own band, which is all a print run would have
-                    // given it.
-                    let t = ((t * 6.0).floor() + 0.5) / 6.0;
-                    let c = ramp.at(t);
-                    let lum = c.max_c();
-                    for sx in 0..scale {
-                        let px = x0 + (ci * gw + gx * scale + sx) as i32;
-                        if px < 0 || px as usize >= b.w {
+                    for sy in 0..scale {
+                        let py = y0 + dy + (gy * scale + sy) as i32;
+                        if py < 0 || py as usize >= b.sh {
                             continue;
                         }
-                        let i = py as usize * b.w + px as usize;
-                        b.base[i] = c;
-                        // Only the brightest bands of the sweep bloom, and
-                        // gently: a chrome word is read by its shape, and a
-                        // glow wide enough to close its counters is a blob.
-                        b.emis[i] = if lum > 0.55 {
-                            c.mul((lum - 0.55) * 0.55)
-                        } else {
-                            Rgb::ZERO
-                        };
+                        for sx in 0..scale {
+                            let px = x0 + dx + (ci * gw + gx * scale + sx) as i32;
+                            if px < 0 || px as usize >= b.w {
+                                continue;
+                            }
+                            let i = py as usize * b.w + px as usize;
+                            b.base[i] = col;
+                            b.emis[i] = col.mul(glow);
+                        }
                     }
                 }
             }
         }
-    }
+    };
+    // Shadow first, fill over it: where they overlap the fill wins, and the
+    // shadow survives only along the lower-right edges — a print, not a glow.
+    stamp(off, off, shadow, 0.0);
+    stamp(0, 0, fill, 0.18);
 }
 
 /// CRT scanline: attenuate the lower sub-row of every cell. Because a cell is

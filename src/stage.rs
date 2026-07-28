@@ -447,7 +447,7 @@ impl Stage {
         if (t * 1.6) as i32 % 2 == 0 {
             text_center(
                 &mut self.buf,
-                "PRESS ENTER",
+                "INSERT COIN",
                 cx,
                 mid as i32 + 8,
                 2,

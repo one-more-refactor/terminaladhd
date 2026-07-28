@@ -338,6 +338,14 @@ impl Breakout {
                 life: 1.0,
             });
         }
+        // The last few bricks are the tensest thing the game has, and the
+        // machine now says so: a count on the banner, heat under it, and the
+        // frame chase quickening through heat.
+        let left = self.bricks.len();
+        if (1..=3).contains(&left) {
+            self.heat = (self.heat + 0.2).min(1.0);
+            self.shout = Some((format!("{left} TO GO"), 1.0));
+        }
         if self.bricks.is_empty() {
             self.score += CLEAR_BONUS;
             self.walls += 1;
