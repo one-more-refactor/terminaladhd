@@ -399,12 +399,13 @@ impl Snake {
             1
         };
         self.since_eat = 0.0;
-        self.eaten += 1;
-
+        // Points at the tier the apple was *taken* on: the tier this apple
+        // causes is the next apple's business, not a retroactive raise.
         let mut points = POINTS[self.tier() as usize];
         if gold {
             points *= GOLD_PAYOUT;
         }
+        self.eaten += 1;
         let gained = points * self.mult;
         self.score += gained;
         self.pops.push(Pop {

@@ -177,6 +177,52 @@ pub fn capsule(b: &mut Buf, x0: i32, y0: i32, size: i32, fill: Rgb, halo: f32) {
     }
 }
 
+/// One tile the way the old tetrominoes were drawn: a light border with its
+/// corners knocked off, a darker body inside it, and a square gleam at the
+/// top left. The border is what matters — every cell in a stack stays its own
+/// tile instead of merging into a colour region, which is most of what makes
+/// an eighties well look like brickwork instead of a bar chart.
+///
+/// Below five sub-pixels the furniture would be the whole cell, so it falls
+/// back to the plain bevel.
+pub fn brick(b: &mut Buf, x0: i32, y0: i32, size: i32, fill: Rgb, halo: f32) {
+    if size < 5 {
+        capsule(b, x0, y0, size, fill, halo);
+        return;
+    }
+    let edge = fill.lerp(hex(WHITE), 0.55);
+    let corner = fill.mul(0.35);
+    let body = fill.mul(0.80);
+    let shade = fill.mul(0.45);
+    let gleam = fill.lerp(hex(WHITE), 0.9);
+    // The gleam grows with the tile, so a big cell does not get a lost speck
+    // and a small one does not get a white quarter.
+    let g = (size / 4).max(1);
+    for dy in 0..size {
+        for dx in 0..size {
+            let on_x = dx == 0 || dx == size - 1;
+            let on_y = dy == 0 || dy == size - 1;
+            let col = if on_x && on_y {
+                // The knocked corner — the "less perfect" in the shape.
+                corner
+            } else if on_x || on_y {
+                edge
+            } else if dx >= size - 2 || dy >= size - 2 {
+                // The body's own shadow along its inner bottom and right.
+                shade
+            } else if dx <= g && dy <= g {
+                gleam
+            } else {
+                body
+            };
+            put_base(b, x0 + dx, y0 + dy, col);
+        }
+    }
+    if halo > 0.0 {
+        glow_rect(b, x0, y0, size, size, fill.mul(halo));
+    }
+}
+
 /// A filled disc in emissive light only — the shockwave and spark primitive.
 pub fn ring(b: &mut Buf, cx: f32, cy: f32, r: f32, thick: f32, col: Rgb) {
     let r0 = (r - thick).max(0.0);

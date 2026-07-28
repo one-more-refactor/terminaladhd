@@ -74,6 +74,17 @@ const SYNC_FRAMES: u32 = 7;
 /// room.
 const ATTRACT_CYCLE: f32 = 5.5;
 
+/// What the diff believes was on screen before the first frame: a cell the
+/// resolver can never produce (identical halves collapse to a space), so every
+/// cell of the first frame is painted — the black ones included. Diffing
+/// against a default (black) cell instead quietly assumed the terminal's own
+/// background was black, and on a light theme the ground simply never appeared.
+const UNPAINTED: crate::world::Cell = crate::world::Cell {
+    half: true,
+    fg: [255, 0, 255],
+    bg: [255, 0, 255],
+};
+
 /// What the loop is running for. The standalone arcade is [`Forever`]; a
 /// wrapped command reports through its own implementation, and the loop ends
 /// when [`Host::finished`] says so.
@@ -221,7 +232,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
     let mut stage = Stage::new(kind, kind.field(w0, h0), w0, h0);
     stage.quality = quality;
     let frame_time = Duration::from_micros(1_000_000 / quality.fps.clamp(10, 120) as u64);
-    let mut prev = vec![Default::default(); stage.w * stage.h];
+    let mut prev = vec![UNPAINTED; stage.w * stage.h];
     let mut presenter = term::Presenter::new(stage.quality.tol);
 
     let mut game = kind.spawn(Rng::new(), w0, h0);
@@ -256,7 +267,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             {
                 stage = Stage::new(kind, game.field(), cw, ch);
                 stage.quality = quality;
-                prev = vec![Default::default(); stage.w * stage.h];
+                prev = vec![UNPAINTED; stage.w * stage.h];
                 term::clear()?;
             }
         }

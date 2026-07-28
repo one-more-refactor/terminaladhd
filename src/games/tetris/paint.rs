@@ -9,7 +9,7 @@
 
 use crate::games::Kind;
 use crate::world::cabinet::{burst, floor, frame, heading, Rule};
-use crate::world::draw::{add_emis, capsule, lit};
+use crate::world::draw::{add_emis, brick, capsule, lit};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
 use crate::world::{hex, Buf, Rgb};
@@ -41,7 +41,7 @@ fn hold_column(b: &mut Buf, l: &Layout, hold: Option<Mino>, ready: bool) {
         // A spent hold is drawn at a third: the slot is visibly not available
         // again until the next piece locks.
         let k = if ready { 1.0 } else { 0.33 };
-        capsule(b, hx as i32, inner, l.mino_px as i32, m.color().mul(k), 0.8 * k);
+        brick(b, hx as i32, inner, l.mino_px as i32, m.color().mul(k), 0.8 * k);
     }
 }
 
@@ -69,7 +69,7 @@ fn right_column(b: &mut Buf, l: &Layout, g: &Tetris) {
         } else {
             1.0
         };
-        capsule(
+        brick(
             b,
             x,
             y,
@@ -142,7 +142,7 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
             } else {
                 0
             };
-            capsule(b, x, y + squash, p - squash.min(p - 1), m.color().mul(0.82), 0.32);
+            brick(b, x, y + squash, p - squash.min(p - 1), m.color().mul(0.82), 0.32);
         }
     }
 
@@ -183,7 +183,7 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
         let (ox, oy) = ((dx * p as f32) as i32, (dy * p as f32) as i32);
         for &(mc, mr) in &cells {
             let (x, y) = l.cell_origin(mc, mr, shake);
-            capsule(b, x + ox, y + oy, p, fill, 0.9 + 0.7 * urgency);
+            brick(b, x + ox, y + oy, p, fill, 0.9 + 0.7 * urgency);
         }
     }
 
