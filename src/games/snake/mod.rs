@@ -22,7 +22,7 @@ use crate::rng::Rng;
 use crate::world::layout::Layout;
 use crate::world::{Buf, Sparks};
 
-use super::{Game, Input, Kick, Kind, Pop};
+use super::{Game, Input, Kick, Kind, Pop, Turn};
 
 /// The arena, taken from the same place the layout takes it so the logic and
 /// the cut hole can never disagree.
@@ -326,29 +326,29 @@ impl Snake {
         self.since_eat
     }
 
-    /// Take a turn from the input. Reversing into your own neck is refused
-    /// here rather than being allowed to kill, since it is always a misfire.
+    /// Bank the turns from this step's presses, in the order they were made.
+    /// Steering reads *taps* and never held state: a key still down from three
+    /// cells ago must not outvote the one just pressed, and two keys rolled
+    /// around a corner have an order that a held-state snapshot throws away.
+    /// Reversing into your own neck is refused here rather than being allowed
+    /// to kill, since it is always a misfire.
     fn steer(&mut self, input: &Input) {
-        let want = if input.up {
-            Some(Dir::Up)
-        } else if input.down {
-            Some(Dir::Down)
-        } else if input.left {
-            Some(Dir::Left)
-        } else if input.right {
-            Some(Dir::Right)
-        } else {
-            None
-        };
-        let Some(want) = want else { return };
-        let last = self.queued.back().copied().unwrap_or(self.dir);
-        if want == last || want.opposite(last) {
-            return;
+        for tap in input.taps.iter() {
+            let want = match tap {
+                Turn::Up => Dir::Up,
+                Turn::Down => Dir::Down,
+                Turn::Left => Dir::Left,
+                Turn::Right => Dir::Right,
+            };
+            let last = self.queued.back().copied().unwrap_or(self.dir);
+            if want == last || want.opposite(last) {
+                continue;
+            }
+            if self.queued.len() >= QUEUE_CAP {
+                return;
+            }
+            self.queued.push_back(want);
         }
-        if self.queued.len() >= QUEUE_CAP {
-            return;
-        }
-        self.queued.push_back(want);
     }
 
     /// Move one cell: consume a queued turn, then walk the head and either grow
@@ -637,15 +637,15 @@ impl Game for Snake {
                 && (0..self.rows).contains(&next.1)
                 && !self.body.contains(&next)
         });
-        let mut input = Input::default();
+        // Taps, not held state — the demo steers through the same door the
+        // player does.
         match safe {
-            Some(Dir::Up) => input.up = true,
-            Some(Dir::Down) => input.down = true,
-            Some(Dir::Left) => input.left = true,
-            Some(Dir::Right) => input.right = true,
-            None => {}
+            Some(Dir::Up) => Input::turn(Turn::Up),
+            Some(Dir::Down) => Input::turn(Turn::Down),
+            Some(Dir::Left) => Input::turn(Turn::Left),
+            Some(Dir::Right) => Input::turn(Turn::Right),
+            None => Input::default(),
         }
-        input
     }
 
     fn shout(&self) -> Option<(&str, f32)> {
@@ -684,14 +684,13 @@ mod tests {
         };
         for _ in 0..(secs / 0.016) as u32 {
             let (x, y) = g.head();
-            let mut input = Input::default();
-            match g.dir() {
-                Dir::Right if x >= COLS - 3 => input.down = true,
-                Dir::Down if y >= ROWS - 3 => input.left = true,
-                Dir::Left if x <= 2 => input.up = true,
-                Dir::Up if y <= 2 => input.right = true,
-                _ => {}
-            }
+            let input = match g.dir() {
+                Dir::Right if x >= COLS - 3 => Input::turn(Turn::Down),
+                Dir::Down if y >= ROWS - 3 => Input::turn(Turn::Left),
+                Dir::Left if x <= 2 => Input::turn(Turn::Up),
+                Dir::Up if y <= 2 => Input::turn(Turn::Right),
+                _ => Input::default(),
+            };
             g.step(&input, ms(16));
             assert!(!g.over, "the lap is supposed to stay alive");
         }
@@ -777,10 +776,7 @@ mod tests {
     #[test]
     fn reversing_into_its_own_neck_is_refused() {
         let mut g = Snake::with_rng(Rng::from_seed(3));
-        let input = Input {
-            left: true,
-            ..Default::default()
-        };
+        let input = Input::turn(Turn::Left);
         g.step(&input, ms(16));
         assert!(g.queued.is_empty(), "a reversal is never queued");
         run(&mut g, &input, 2);
@@ -791,23 +787,42 @@ mod tests {
     #[test]
     fn two_turns_inside_one_cell_both_land() {
         let mut g = Snake::with_rng(Rng::from_seed(4));
-        g.step(
-            &Input {
-                up: true,
-                ..Default::default()
-            },
-            ms(1),
-        );
-        g.step(
-            &Input {
-                left: true,
-                ..Default::default()
-            },
-            ms(1),
-        );
+        g.step(&Input::turn(Turn::Up), ms(1));
+        g.step(&Input::turn(Turn::Left), ms(1));
         assert_eq!(g.queued.len(), 2, "the second tap is buffered, not eaten");
         run(&mut g, &Input::default(), 2);
         assert_eq!(g.dir(), Dir::Left);
+    }
+
+    #[test]
+    fn a_corner_rolled_in_one_frame_keeps_its_order() {
+        // Up and left land in the same poll — the classic fast corner. Held
+        // state would collapse them into one; the taps keep both, in order.
+        let mut g = Snake::with_rng(Rng::from_seed(12));
+        let mut input = Input::turn(Turn::Up);
+        input.taps.push(Turn::Left);
+        g.step(&input, ms(1));
+        assert_eq!(
+            g.queued.iter().copied().collect::<Vec<_>>(),
+            vec![Dir::Up, Dir::Left],
+            "both turns of the corner are banked, in press order"
+        );
+        run(&mut g, &Input::default(), 4);
+        assert_eq!(g.dir(), Dir::Left, "and both were spent");
+    }
+
+    #[test]
+    fn a_held_key_cannot_outvote_a_tap() {
+        // The old bug: steering read held state through a priority chain, so a
+        // key still down from three cells ago re-queued its direction right
+        // after the turn the player actually made. Held booleans must not
+        // steer at all.
+        let mut g = Snake::with_rng(Rng::from_seed(13));
+        let mut held = Input::turn(Turn::Up);
+        held.right = true; // still holding the old direction down
+        g.step(&held, ms(1));
+        assert_eq!(g.queued.len(), 1, "only the tap steers");
+        assert_eq!(g.queued[0], Dir::Up);
     }
 
     #[test]

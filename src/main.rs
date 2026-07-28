@@ -10,6 +10,7 @@
 //! The world is drawn on stderr. stdout belongs to the wrapped command, so
 //! `adhd -- ls | wc -l` is still just `ls | wc -l`.
 
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::process::ExitCode;
 
 use anyhow::{bail, Result};
@@ -94,6 +95,23 @@ fn main() -> ExitCode {
             eprintln!("adhd: {e:#}");
             ExitCode::from(1)
         }
+    }
+}
+
+/// The arcade behind a crash barrier: a panic in the loop must not take the
+/// process with it, because the process may be carrying someone's command.
+/// `None` means it went down — the terminal is already restored (the panic
+/// hook in [`term::Guard`] runs before the unwind) and the panic itself is
+/// already on stderr.
+fn arcade(
+    host: &mut dyn app::Host,
+    w: usize,
+    h: usize,
+    quality: Quality,
+) -> Result<Option<Exit>> {
+    match catch_unwind(AssertUnwindSafe(|| app::run(host, w, h, quality))) {
+        Ok(result) => result.map(Some),
+        Err(_) => Ok(None),
     }
 }
 
@@ -406,8 +424,12 @@ fn run() -> Result<i32> {
         if !term::attached() {
             bail!("no terminal on stderr; there is nothing to play on");
         }
-        app::run(&mut Forever, w, h, quality)?;
-        return Ok(0);
+        return match arcade(&mut Forever, w, h, quality)? {
+            // The panic hook has already restored the terminal and printed
+            // the panic; all that is left is to not pretend it went well.
+            None => Ok(1),
+            Some(_) => Ok(0),
+        };
     };
 
     let mut cmd = Command::spawn(&argv)?;
@@ -427,11 +449,18 @@ fn run() -> Result<i32> {
         return Ok(code);
     }
 
-    let exit = app::run(&mut cmd, w, h, quality)?;
+    let exit = arcade(&mut cmd, w, h, quality)?;
 
-    // The player leaving is not the command leaving: keep waiting, quietly, so
-    // the exit code we hand back is always the command's own.
-    if exit == Exit::Quit {
+    // The player leaving is not the command leaving — and neither is the
+    // arcade crashing. Keep waiting, quietly, so the exit code we hand back is
+    // always the command's own.
+    if exit != Some(Exit::Finished) {
+        if exit.is_none() {
+            eprintln!(
+                "adhd: the arcade crashed — `{}` is unaffected, waiting for it",
+                cmd.label()
+            );
+        }
         while !cmd.is_done() {
             std::thread::sleep(app::STEP);
         }

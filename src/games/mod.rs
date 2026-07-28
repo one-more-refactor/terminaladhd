@@ -33,6 +33,58 @@ pub struct Input {
     pub ccw: bool,
     pub hard: bool,
     pub hold: bool,
+    /// Direction *presses* this step, in the order they arrived. The booleans
+    /// above are state — true for as long as a key is down — which is what an
+    /// auto-shift wants and exactly what a steering wheel does not: held state
+    /// has no order, so two keys rolled around a corner collapse into
+    /// whichever the reader happens to check first, and a key still held from
+    /// three cells ago outvotes the tap that was meant to turn. A tap lands
+    /// here once, in sequence, and is never outvoted by a hold.
+    pub taps: Taps,
+}
+
+impl Input {
+    /// An input that taps one direction — the way a snake is actually steered.
+    pub fn turn(t: Turn) -> Input {
+        let mut input = Input::default();
+        input.taps.push(t);
+        input
+    }
+}
+
+/// A direction key going down.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Turn {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// Direction presses in arrival order, at most four to a step — enough to bank
+/// a double corner with room to spare, and small enough to stay `Copy`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Taps {
+    buf: [Option<Turn>; 4],
+}
+
+impl Taps {
+    /// Record a press; presses past the fourth are dropped, which by then is
+    /// mashing rather than steering.
+    pub fn push(&mut self, t: Turn) {
+        if let Some(slot) = self.buf.iter_mut().find(|s| s.is_none()) {
+            *slot = Some(t);
+        }
+    }
+
+    /// The presses, oldest first.
+    pub fn iter(&self) -> impl Iterator<Item = Turn> + '_ {
+        self.buf.iter().flatten().copied()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buf[0].is_none()
+    }
 }
 
 /// A score marker floating up from where it was earned. Both games emit these
@@ -262,6 +314,58 @@ mod tests {
         for (i, a) in ALL.iter().enumerate() {
             for b in &ALL[i + 1..] {
                 assert_ne!(a.slug(), b.slug());
+            }
+        }
+    }
+
+    #[test]
+    fn no_input_storm_at_any_size_panics_a_game() {
+        // A cheap fuzz: every kind, a spread of frames, random input every
+        // step, run well past death. In a debug build this also catches
+        // arithmetic overflow. It proves nothing about correctness — it exists
+        // because "the game crashed while I was playing" is the one bug report
+        // that must never be true, and random mashing is how players play.
+        for (k, kind) in ALL.into_iter().enumerate() {
+            for (i, (w, h)) in [(60, 24), (80, 25), (120, 34), (200, 50), (400, 100)]
+                .into_iter()
+                .enumerate()
+            {
+                let seed = (k * 8 + i) as u64 + 1;
+                let mut fz = Rng::from_seed(seed ^ 0x5eed);
+                let mut game = kind.spawn(Rng::from_seed(seed), w, h);
+                let mut dead = 0;
+                for _ in 0..4000 {
+                    let mut input = Input {
+                        left: fz.range(4) == 0,
+                        right: fz.range(4) == 0,
+                        up: fz.range(8) == 0,
+                        down: fz.range(4) == 0,
+                        cw: fz.range(8) == 0,
+                        ccw: fz.range(8) == 0,
+                        hard: fz.range(16) == 0,
+                        hold: fz.range(16) == 0,
+                        taps: Taps::default(),
+                    };
+                    for _ in 0..fz.range(3) {
+                        input.taps.push(match fz.range(4) {
+                            0 => Turn::Up,
+                            1 => Turn::Down,
+                            2 => Turn::Left,
+                            _ => Turn::Right,
+                        });
+                    }
+                    game.step(&input, Duration::from_millis(16));
+                    let _ = (game.score(), game.heat(), game.shake(), game.tally());
+                    let _ = (game.take_punch(), game.take_hitstop(), game.take_kick());
+                    if game.is_over() {
+                        dead += 1;
+                        // A dead game is still stepped by the shell during the
+                        // settle; it has to survive that too.
+                        if dead > 120 {
+                            break;
+                        }
+                    }
+                }
             }
         }
     }

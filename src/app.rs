@@ -680,6 +680,7 @@ fn input(k: &Keys) -> Input {
         ccw: k.ccw,
         hard: k.hard,
         hold: k.hold,
+        taps: k.taps,
     }
 }
 

@@ -19,6 +19,7 @@ use crossterm::{
     ExecutableCommand,
 };
 
+use crate::games::{Taps, Turn};
 use crate::world::{enc_diff, Cell};
 
 /// Used when the terminal will not say how big it is (a pipe, a CI log).
@@ -198,6 +199,10 @@ pub struct Keys {
     pub help: bool,
     /// Esc, q or Ctrl-C — leave whatever we are in.
     pub quit: bool,
+    /// Direction keys *going down* this frame, in arrival order. The booleans
+    /// above are held state; these are the presses themselves, which is what
+    /// steering wants — a hold must never outvote a tap.
+    pub taps: Taps,
 }
 
 impl Keys {
@@ -351,6 +356,14 @@ impl Pad {
                         continue;
                     }
                     p.keys.press(k.code, k.modifiers);
+                    // A tap is the key going down, once. Repeats are the same
+                    // hold restated, and folding them in would hand the old
+                    // priority bug back on any terminal that reports them.
+                    if k.kind == KeyEventKind::Press {
+                        if let Some(t) = turn(k.code) {
+                            p.keys.taps.push(t);
+                        }
+                    }
                     for (i, d) in direction(k.code).into_iter().enumerate() {
                         if d {
                             self.held[i] = true;
@@ -387,6 +400,21 @@ impl Pad {
         self.held = [false; DIRS];
         self.seen = [None; DIRS];
     }
+}
+
+/// The turn a key press means, if any — same map as [`direction`], as an event
+/// rather than a state.
+fn turn(code: KeyCode) -> Option<Turn> {
+    let d = direction(code);
+    [
+        (LEFT, Turn::Left),
+        (RIGHT, Turn::Right),
+        (UP, Turn::Up),
+        (DOWN, Turn::Down),
+    ]
+    .into_iter()
+    .find(|&(i, _)| d[i])
+    .map(|(_, t)| t)
 }
 
 /// Which of the four directions a key means, if any. Arrows, vim and the
