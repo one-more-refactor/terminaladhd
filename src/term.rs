@@ -152,15 +152,29 @@ fn restore() {
 /// [`crate::world::encode`] clears its output first, so writing the DEC 2026
 /// introducer into that same buffer would silently drop it and every frame
 /// would tear.
-#[derive(Default)]
 pub struct Presenter {
     body: Vec<u8>,
-    out: Vec<u8>,
     /// Matched to the stage's own resolve tolerance, or the diff will re-send
     /// cells the resolver already decided were the same.
     pub tol: i32,
     /// Emit xterm-256 codes instead of truecolor — lean mode's wire dialect.
     pub palette: bool,
+    tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    writer: Option<std::thread::JoinHandle<()>>,
+    /// A composed frame the writer had no room for yet. At most one: while
+    /// it waits, no new frames are composed.
+    pending: Option<Vec<u8>>,
+}
+
+impl Drop for Presenter {
+    fn drop(&mut self) {
+        // Close the channel and wait the writer out, so the restore sequence
+        // that follows cannot interleave with a frame still in flight.
+        self.tx.take();
+        if let Some(w) = self.writer.take() {
+            let _ = w.join();
+        }
+    }
 }
 
 /// The run-joining gap: cells this far apart are worth re-addressing rather
@@ -169,16 +183,55 @@ const GAP: usize = 6;
 
 impl Presenter {
     pub fn new(tol: i32, palette: bool) -> Self {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
+        let writer = std::thread::spawn(move || {
+            let mut err = io::stderr();
+            while let Ok(frame) = rx.recv() {
+                let _ = err.write_all(&frame);
+                let _ = err.flush();
+            }
+        });
         Presenter {
+            body: Vec::new(),
             tol,
             palette,
-            ..Default::default()
+            tx: Some(tx),
+            writer: Some(writer),
+            pending: None,
         }
     }
 
-    /// One atomic present: DEC 2026 brackets the whole diff so a burst lands as
-    /// a single update instead of tearing across the scanout.
+    /// One atomic present: DEC 2026 brackets the whole diff so a burst lands
+    /// as a single update instead of tearing across the scanout.
+    ///
+    /// The write happens on its own thread, and this is the fix for the
+    /// machine feeling slow on any terminal that cannot drain the stream: a
+    /// blocking `write_all` on the game loop meant that when the terminal
+    /// fell behind, *everything* fell behind — input, sim, the lot — and no
+    /// amount of game tuning could feel responsive through it. Now a slow
+    /// terminal costs frames, never the game: if the writer is still busy
+    /// with the last frame, this one is simply not composed — `prev` is left
+    /// untouched, so the next composed diff is exactly what the terminal
+    /// missed.
     pub fn frame(&mut self, cells: &[Cell], prev: &mut [Cell], w: usize, h: usize) -> Result<()> {
+        let Some(tx) = &self.tx else {
+            return Ok(());
+        };
+        // A frame that could not be handed over last time goes first: every
+        // composed diff advanced `prev`, so every composed diff must reach
+        // the terminal, in order, or the screen goes stale. While one is
+        // still waiting, nothing new is composed — which is exactly the
+        // self-throttle a slow terminal wants.
+        if let Some(held) = self.pending.take() {
+            match tx.try_send(held) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(held)) => {
+                    self.pending = Some(held);
+                    return Ok(());
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return Ok(()),
+            }
+        }
         enc_diff(
             cells,
             prev,
@@ -191,13 +244,16 @@ impl Presenter {
             },
             &mut self.body,
         );
-        self.out.clear();
-        self.out.extend_from_slice(b"\x1b[?2026h");
-        self.out.extend_from_slice(&self.body);
-        self.out.extend_from_slice(b"\x1b[?2026l");
-        let mut err = io::stderr();
-        err.write_all(&self.out)?;
-        err.flush()?;
+        if self.body.is_empty() {
+            return Ok(());
+        }
+        let mut out = Vec::with_capacity(self.body.len() + 16);
+        out.extend_from_slice(b"\x1b[?2026h");
+        out.extend_from_slice(&self.body);
+        out.extend_from_slice(b"\x1b[?2026l");
+        if let Err(std::sync::mpsc::TrySendError::Full(out)) = tx.try_send(out) {
+            self.pending = Some(out);
+        }
         Ok(())
     }
 }
