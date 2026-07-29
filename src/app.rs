@@ -234,6 +234,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
     let frame_time = Duration::from_micros(1_000_000 / quality.fps.clamp(10, 120) as u64);
     let mut prev = vec![UNPAINTED; stage.w * stage.h];
     let mut presenter = term::Presenter::new(stage.quality.tol, stage.quality.palette);
+    // The band plays unless told not to, and never over SSH — the sound
+    // would come out of the wrong building.
+    let mut juke =
+        crate::sound::Jukebox::start(!term::remote() && std::env::var_os("ADHD_MUTE").is_none());
 
     let mut game = kind.spawn(Rng::new(), w0, h0);
     // The attract screen shows a game playing itself, and it is never the one
@@ -442,6 +446,7 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
         // lives here so both of them react identically to the same kind of
         // thing.
         if let Some(kick) = game.take_kick() {
+            juke.kick(kick);
             let (pattern, hue) = match kick {
                 Kick::Small => (strobe::CLEAR, hex(WHITE)),
                 Kick::Big => (strobe::BIG, hex(WHITE)),
@@ -493,6 +498,17 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             let input = demo.autopilot();
             demo.step(&input, STEP);
         }
+
+        juke.mood(
+            match machine.mode {
+                Mode::Attract { .. } | Mode::Coin { .. } => crate::sound::Scene::Attract,
+                Mode::Spin { .. } => crate::sound::Scene::Spin,
+                Mode::Play | Mode::Help { .. } => crate::sound::Scene::Play,
+                Mode::Paused => crate::sound::Scene::Paused,
+                Mode::Over { .. } | Mode::Board { .. } => crate::sound::Scene::Over,
+            },
+            game.heat(),
+        );
 
         match &machine.mode {
             Mode::Attract { since } => {

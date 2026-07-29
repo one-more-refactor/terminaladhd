@@ -67,6 +67,13 @@ lamp chase stepping around the marquee, and a real slot reel — names on a
 strip behind a lit window with detent marks, overshooting its stop and
 rocking back when it lands.
 
+And it has a soundtrack: a hand-rolled chip synth — square waves, noise and
+an E-minor loop that is deliberately a little dirty — piped raw into
+whatever player the system has. The tempo rides your heat, every kick the
+screen strobes to lands as a stinger in the mix, the wheel gets a riser and
+a death gets the bottom dropped out. `--mute` (or `ADHD_MUTE=1`) turns it
+off; over SSH it stays quiet on its own.
+
 The chrome is one row: the live score at the left, whatever the game has to
 shout — TETRIS, GOLDEN, a streak — beside it, the wrapped command's last line,
 and the clock at the right. The arena is a slab with a machined bevel for an

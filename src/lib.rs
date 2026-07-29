@@ -15,6 +15,7 @@ pub mod app;
 pub mod games;
 pub mod rng;
 pub mod scores;
+pub mod sound;
 pub mod stage;
 pub mod term;
 pub mod world;

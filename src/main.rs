@@ -39,6 +39,7 @@ keys: wasd, arrows or hjkl steer; x or up rotates, z counter-rotates,
                         bytes and half the frames, for the same picture.
   --bench               report what a frame costs down a wire
   --shot DIR            dump every screen as PPM and exit
+  --mute                no soundtrack (or set ADHD_MUTE=1)
   --version             print the version and exit
 
 env:  ADHD_SCORES        where the high-score table lives
@@ -96,6 +97,9 @@ fn parse(argv: Vec<String>) -> Result<Args> {
             "--lean" => out.lean = Some(true),
             "--rich" => out.lean = Some(false),
             "-h" | "--help" => out.help = true,
+            "--mute" => {
+                std::env::set_var("ADHD_MUTE", "1");
+            }
             "-V" | "--version" => {
                 let build = env!("ADHD_BUILD");
                 if build.is_empty() {

@@ -578,6 +578,32 @@ a breadth-first search that gives live ghosts a wide berth and turns hunter
 the moment the pack is blue — competent enough to clear a board, mortal
 enough that the attract loop always moves on.
 
+## The soundtrack
+
+The machine hand-rolls its pixels, so it hand-rolls its samples: square
+waves, a triangle, white noise and an envelope apiece — the voices a 1983
+sound chip had — sequenced into an endless four-bar E-minor loop
+(i–VI–III–VII, the epic progression, with a v-minor bar swapped in on every
+other pass so it never settles). It is deliberately not quite tidy: the
+twin oscillator drifts up to nine cents against its partner, the arp drops
+notes, the bass leans on the seventh when it feels like it, and the whole
+mix runs through a soft clip and a bit-crush that bites harder the hotter
+the run gets.
+
+There is no audio crate. The synth writes raw PCM into `pw-play`, `paplay`
+or `aplay` — whichever the system already has — and the blocking pipe is
+the metronome: the player drinks at 44.1 kHz and the worker idles against
+it. No player means no sound and no complaint; over SSH the band stays
+home, because the sound would come out of the wrong building.
+
+The music is wired to the same feel vocabulary as the glass. The shell
+hands it the scene and the heat — tempo and hat density ride the heat, the
+wheel gets a snare-roll riser, pause pulls the drums and closes the filter,
+the board plays a halftime toll. And every [`Kick`] the screen strobes to
+lands as a stinger in the mix the same frame: a two-note stab, octave
+stabs, the full fanfare with the loop ducked under it, a warm major arp for
+a bonus, and the bottom falling out of the pitch for a death.
+
 ## Adding a game
 
 One `games::Kind` variant and one module. `Kind` carries the arena size, the
