@@ -8,7 +8,7 @@
 //! greyed to say it is inactive — it is either lit or it is not drawn.
 
 use crate::games::Kind;
-use crate::world::cabinet::{burst, floor, frame, heading, Rule};
+use crate::world::cabinet::{burst, floor, frame, heading, Edge, Rule};
 use crate::world::draw::{add_emis, brick, capsule, lit};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
@@ -114,8 +114,14 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Tetris) {
         .hue()
         .lerp(c(ORANGE), danger * (0.55 + 0.45 * pulse));
     let ignite = ignite.max(danger * 0.35 * pulse);
-    let chase = g.elapsed.as_secs_f32() * (0.45 + 1.6 * g.heat() + 2.4 * danger);
-    frame(b, l, shake, hue, ignite, chase);
+    frame(
+        b,
+        l,
+        shake,
+        hue,
+        ignite,
+        [Edge::Open, Edge::Wall, Edge::Wall, Edge::Wall],
+    );
 
     // The stack falls into a cleared gap over about a tenth of a second. A
     // block is drawn as many rows above where it now logically sits as there

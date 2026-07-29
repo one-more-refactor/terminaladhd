@@ -44,7 +44,7 @@ What is on screen now:
 | layer | what it is | why it earns its place |
 |---|---|---|
 | ground | flat near-black | the black a monitor is at rest |
-| warp field | streaks flying outward, on the idle screens only | spectacle where there is no game to read; play runs on clean black |
+| warp field | streaks flying outward from behind the arena | a readout of how well you are doing, drawn as light — it never occludes |
 | arena | the game | the game |
 | frame | a hard rail round the arena | says where the field ends, and nothing else |
 | columns | HOLD, NEXT, the readings | the numbers you are chasing |
@@ -180,20 +180,30 @@ boundary does. The wall warning already says it, locally, at the moment it
 matters and in the direction it matters, which is everything a resting colour
 cannot do.
 
-So the rail is only an edge. Snake's is cool white, because its body already
-runs cyan to magenta and its morsel is green, and there is no hot hue left that
-would not be competing with the game inside it.
+What replaced it is the machine's own object language. Every brick on this
+screen is shaded one way: light where the light catches, dark where the shape
+falls away. The field is now the biggest brick of all — a slab, with a
+machined bevel for an edge. A side that is only furniture gets the quiet
+bevel: pale steel along the top and left, dark iron along the bottom and
+right. A side that ends the run gets two sub-pixels of the game's own hue
+instead — not a warning colour, *its* colour, which is how the boundary says
+what it does without ever reaching for red.
 
-The shape took two goes as well. It was a hairline with two sub-pixels of
-overshoot poking out of each corner. The overshoot was meant to read as a bezel
-and read as whiskers, and one sub-pixel under this much bloom is a fuzzy line
-rather than an edge.
+So snake, where every wall kills, is ringed in its own cool white; the
+tetris well, where no wall kills anything, is a quiet pocket left open at
+the top for the pieces to fall into; and breakout wears the bevel on the
+three sides the ball plays off while the open floor — the only edge that
+takes a ball — is dashed hot violet, because a wall you can fall through
+must not be drawn as a wall. The corners took care
+of themselves: bands overlapping at the ends of a rectangle is what a butt
+joint looks like, and a butt joint is what a cabinet has.
 
-It is two rules now — a bright inner one that is the actual edge of the field,
-and a dim outer one half a step away. One line reads as a hairline someone
-forgot to finish; two read as a rail with a shadow under it. The corners are
-made of the same rule, run brighter and a little way along both edges, so
-nothing sticks out of the rectangle at all.
+The fields got floors at the same time. Snake's lattice of pips read as grid
+paper; it is a checkerboard now, alternate cells lifted to the darkest navy
+the posterize ladder can hold, which reads as tile the way every pit floor
+in the arcade did. The tetris well stays empty — a falling game needs no
+help seeing its columns — and breakout's court stays black because a ball
+at speed is the one thing on the machine that must never share its ground.
 
 Nothing on it is brighter than the game inside it, either. A frame that
 outshines the playfield is a picture frame, and the only time it is allowed to
@@ -306,11 +316,11 @@ that matter are the ones that just left.
 The screen is deliberately sparse, and the price of sparse is that whatever is
 left had better be alive. Every element that survived the cut moves:
 
-- **The arena frame is a marquee.** Four lights with long tails run its
-  perimeter, faster the better the player is doing — the same thing the warp
-  field says, said again where the eye already is. It was the one element that
-  would otherwise never have moved, and a bright dot travelling a border at this
-  resolution is a flicker, so they are comets rather than bulbs.
+- **The arena frame holds still — on purpose.** It carried a light chase for
+  a while, and on the fat bevel the lights read as white blobs crawling the
+  one line the player judges every distance against. The warp field already
+  says how fast you are going, everywhere, so the boundary now says only what
+  it is. The stillness is load-bearing.
 - **A lock is absorbed.** The block a piece comes to rest on flattens for a
   tenth of a second and springs back. Only the top of each column does it, or
   the whole well would breathe.

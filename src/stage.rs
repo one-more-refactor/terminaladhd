@@ -652,7 +652,7 @@ impl Stage {
 
     /// A game, running.
     pub fn game(&mut self, g: &dyn Game, tick: &Tick) {
-        self.open_bare();
+        self.open(g.heat());
         g.paint(&mut self.buf, &self.layout);
         self.feedback(g);
         self.close_playing(g, tick);
@@ -713,7 +713,7 @@ impl Stage {
     /// raster — the picture is visibly held rather than replaced, so it is
     /// obvious nothing has been lost.
     pub fn paused(&mut self, g: &dyn Game, tick: &Tick) {
-        self.open_bare();
+        self.open(0.0);
         g.paint(&mut self.buf, &self.layout);
         self.dim_all(0.35);
         let cx = self.layout.w as i32 / 2;
@@ -968,14 +968,6 @@ impl Stage {
         }
     }
 
-    /// Ground only. The play screens run on clean black: a field flying
-    /// behind a game being *read* taxes exactly the attention the game
-    /// needs, and it was the last moving thing left under the playfield.
-    /// The warp keeps the screens with nothing to protect — the marquee,
-    /// the reel, the settle — where spectacle is the whole job.
-    fn open_bare(&mut self) {
-        ground(&mut self.buf);
-    }
 
     /// Strip, rule, ticker, post, resolve — the same tail on every screen, so
     /// the chrome never flickers between two of them.

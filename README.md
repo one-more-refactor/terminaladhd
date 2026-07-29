@@ -59,17 +59,21 @@ minos are bordered bricks with knocked corners, and the chrome wordmark is
 silkscreened in flat bands. Nothing on this screen fades smoothly, because
 nothing on a 1983 screen could.
 
-The games play on clean black — nothing moves behind a field you are trying
-to read. The spectacle lives on the screens with nothing to protect: a lamp
-chase stepping around the marquee, a warp field flying behind the reel — a
-real slot reel now, names on a strip behind a lit window with detent marks,
-overshooting its stop and rocking back when it lands.
+Behind everything flies the warp field — streaks pouring out of a point
+behind the arena, drifting at rest, stretching as you heat up, punching into
+hyperspace when something lands. It is drawn as light, so it never covers a
+thing you need to read. The idle screens get the rest of the spectacle: a
+lamp chase stepping around the marquee, and a real slot reel — names on a
+strip behind a lit window with detent marks, overshooting its stop and
+rocking back when it lands.
 
 The chrome is one row: the live score at the left, whatever the game has to
 shout — TETRIS, GOLDEN, a streak — beside it, the wrapped command's last line,
-and the clock at the right. Around the arena is a hard rail, which is only an
-edge — what the walls do to you is said by the wall itself, lighting up as you
-close on it.
+and the clock at the right. The arena is a slab with a machined bevel for an
+edge, and the bevel says what each side does: a wall that kills you wears the
+game's own colour, a wall that is only furniture is quiet iron — snake ringed
+all the way round, the tetris well all quiet, breakout hot only along the open
+floor. Snake plays on checkerboard tile; a wall lights up as you close on it.
 
 Both games share one feel and one grammar. An impact stops the whole machine
 for a few frames, so a Tetris and a swallowed apple land rather than merely

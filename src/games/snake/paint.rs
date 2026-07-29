@@ -6,7 +6,7 @@
 //! about to be, and how much the next apple is worth.
 
 use crate::games::{Game, Kind};
-use crate::world::cabinet::{burst, flash_arena, floor, frame, readouts, Rule, Stat};
+use crate::world::cabinet::{burst, flash_arena, floor, frame, readouts, Edge, Rule, Stat};
 use crate::world::draw::{add_emis, pill, put_base};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
@@ -242,7 +242,7 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Snake) {
             occupied[(y * cols + x) as usize] = true;
         }
     }
-    floor(b, l, shake, Rule::Lattice, &|mc, mr| {
+    floor(b, l, shake, Rule::Check, &|mc, mr| {
         (0..cols).contains(&mc) && (0..rows).contains(&mr) && occupied[(mr * cols + mc) as usize]
     });
     // The frame flares when an apple lands and when the run ends. It is the
@@ -252,8 +252,7 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Snake) {
     } else {
         (0.8 - g.since_eat() * 9.0).max(0.0)
     };
-    let chase = t * (0.45 + 1.6 * g.heat());
-    frame(b, l, shake, Kind::Snake.hue(), ignite, chase);
+    frame(b, l, shake, Kind::Snake.hue(), ignite, [Edge::Kill; 4]);
     if g.death() == 0.0 {
         wall_warning(b, l, g, shake);
     }

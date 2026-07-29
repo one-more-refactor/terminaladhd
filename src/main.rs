@@ -248,6 +248,15 @@ fn shots(dir: &str, w: usize, h: usize) -> Result<()> {
     stage.game(mid.as_ref(), &tick);
     dump(&stage, "hit")?;
 
+    // The strobe pattern and the hit distortion outlive their frames by
+    // design; the per-kind portraits must not be shot through the afterglow.
+    stage.tear = 0.0;
+    stage.fringe = 0.0;
+    stage.jolt = (0, 0);
+    for _ in 0..12 {
+        stage.game(mid.as_ref(), &tick);
+    }
+
     for kind in ALL {
         stage.retarget(kind, kind.field(w, h));
         // Stopped a couple of frames after a score lands, so the still shows a

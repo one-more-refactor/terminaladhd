@@ -6,7 +6,7 @@
 //! reserved for what matters and nothing matters more than where the ball is.
 
 use crate::games::{Game, Kind};
-use crate::world::cabinet::{floor, frame, readouts, Rule, Stat};
+use crate::world::cabinet::{floor, frame, readouts, Edge, Rule, Stat};
 use crate::world::draw::{add_emis, slab};
 use crate::world::layout::Layout;
 use crate::world::scene::palette::*;
@@ -32,10 +32,17 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Breakout) {
 
     floor(b, l, shake, Rule::None, &|_, _| false);
 
-    // The frame runs the game's own violet and chases faster with heat; the
-    // wall going is said by the strobe the Huge kick fires, not by the rail.
-    let chase = g.elapsed * (0.45 + 1.6 * g.heat());
-    frame(b, l, shake, Kind::Breakout.hue(), 0.0, chase);
+    // Three quiet walls the ball plays off, and a floor that is not there:
+    // the open bottom is dashed in the game's violet, because the one edge
+    // that takes a ball must not be drawn as a wall.
+    frame(
+        b,
+        l,
+        shake,
+        Kind::Breakout.hue(),
+        0.0,
+        [Edge::Wall, Edge::Wall, Edge::Lava, Edge::Wall],
+    );
 
     // The wall.
     for brick in g.bricks() {

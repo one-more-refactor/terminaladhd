@@ -31,112 +31,73 @@ pub fn ground(b: &mut Buf) {
 
 // ------------------------------------------------------------------- arena
 
-/// The arena's edge, and the lights running round it.
+/// What one side of the arena does to the thing that touches it. The edge is
+/// drawn from this, so the boundary *says what it does* — and each game gets
+/// its own silhouette from nothing but the truth: snake is a sealed ring,
+/// the tetris well is an open-topped pocket, breakout is a roofed court over
+/// a floor that is not there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    /// Ends the run. Two sub-pixels of the game's own hue — not a warning
+    /// colour, *its* colour, which is how a boundary can say "I kill" without
+    /// reaching for red.
+    Kill,
+    /// Furniture: bounced off or rested against. The quiet bevel.
+    Wall,
+    /// Ends the run, but nothing is there — breakout's open floor. The same
+    /// hot hue as [`Edge::Kill`], dashed, because a wall you can fall through
+    /// must not be drawn as a wall.
+    Lava,
+    /// Nothing at all. Pieces fall into the tetris well through this side.
+    Open,
+}
+
+/// Sides in order: top, right, bottom, left.
+pub type Edges = [Edge; 4];
+
+/// The arena's boundary, in the machine's own object language: the field is
+/// the biggest brick on the screen — a slab — and its edge is the slab's
+/// machined bevel. Light where the light catches (top, left), dark where the
+/// shape falls away (bottom, right): the same shading rule every brick
+/// follows. A side that kills trades the bevel for the game's hue, per
+/// [`Edge`].
 ///
-/// It used to be a hairline with two sub-pixels of overshoot poking out of each
-/// corner. The overshoot was meant to read as a bezel and read as whiskers, and
-/// a single sub-pixel under this much bloom is a fuzzy line rather than an
-/// edge. So: a solid two-deep rule, no overshoot, and the corners are made of
-/// the same rule run brighter and longer rather than of anything sticking out
-/// of them.
-///
-/// A cabinet's marquee had lights chasing its border, and a static rectangle is
-/// the one thing on this screen that would otherwise never move. `phase` runs
-/// `0..1` round the perimeter; the game drives it faster the better the player
-/// is doing, so the frame is a second readout of the same thing the warp field
-/// is showing.
-///
-/// `ignite` in `0.0..=1.0` drives the whole border toward white — a frame that
-/// flares is the cheapest and loudest way to say a thing just landed.
-pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, phase: f32) {
+/// `ignite` in `0.0..=1.0` drives the whole boundary toward white — a frame
+/// that flares is the cheapest and loudest way to say a thing just landed.
+pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, edges: Edges) {
     let (ax0, ay0, ax1, ay1) = l.arena_sub(shake);
     let ignite = ignite.clamp(0.0, 1.0);
-    let col = hue.lerp(c(WHITE), ignite);
+    let hot_col = hue.lerp(c(WHITE), ignite).mul(0.85 + 0.6 * ignite);
+    // Bright enough to clear the posterize floor, never bright enough to
+    // compete with a piece.
+    let bevel_light = c(STEEL).mul(0.85);
+    let bevel_dark = c(IRON).mul(2.4);
 
-    // One rail, two sub-pixels deep. A single sub-pixel line is a vector
-    // stroke, and nothing else on this screen is a vector any more — the rail
-    // is a fat rule like everything it contains. No glow at rest: a lit rail
-    // feeds the bloom pass, and bloom over a black field turns the rail into
-    // a soft grey band hanging off it. It gets its light back when it flares.
-    let inner = (ax0 - 1, ay0 - 1, ax1 + 1, ay1 + 1);
-    let outer = (ax0 - 2, ay0 - 2, ax1 + 2, ay1 + 2);
-    edge(b, outer, col.mul(0.85), col.mul(0.3 * ignite));
-    edge(b, inner, col.mul(0.85), col.mul(1.1 * ignite));
-
-    // Corners are the same rule run a little way along both edges. Nothing
-    // sticks out of the rectangle, and nothing is brighter than the game
-    // inside it — a frame that outshines the playfield is a picture frame.
-    let reach = (l.mino_px as i32 * 3 / 2).clamp(3, 9);
-    for (cx, cy, sx, sy) in [
-        (ax0 - 1, ay0 - 1, 1, 1),
-        (ax1 + 1, ay0 - 1, -1, 1),
-        (ax0 - 1, ay1 + 1, 1, -1),
-        (ax1 + 1, ay1 + 1, -1, -1),
-    ] {
-        for k in 0..reach {
-            let fade = 1.0 - k as f32 / reach as f32;
-            let bright = col.lerp(c(WHITE), 0.35 * fade);
-            put_base(b, cx + sx * k, cy, bright);
-            put_base(b, cx, cy + sy * k, bright);
+    let sides: [(i32, i32, i32, i32); 4] = [
+        (ax0 - 2, ay0 - 2, ax1 + 2, ay0 - 1), // top
+        (ax1 + 1, ay0 - 2, ax1 + 2, ay1 + 2), // right
+        (ax0 - 2, ay1 + 1, ax1 + 2, ay1 + 2), // bottom
+        (ax0 - 2, ay0 - 2, ax0 - 1, ay1 + 2), // left
+    ];
+    for (i, (x0, y0, x1, y1)) in sides.into_iter().enumerate() {
+        if edges[i] == Edge::Open {
+            continue;
         }
-    }
-
-    bulbs(b, inner, col, phase);
-}
-
-/// One rectangle of rule, one sub-pixel thick.
-fn edge(b: &mut Buf, rect: (i32, i32, i32, i32), col: Rgb, glow: Rgb) {
-    let (x0, y0, x1, y1) = rect;
-    for y in y0..=y1 {
-        lit(b, x0, y, col, glow);
-        lit(b, x1, y, col, glow);
-    }
-    for x in x0..=x1 {
-        lit(b, x, y0, col, glow);
-        lit(b, x, y1, col, glow);
-    }
-}
-
-/// How many lights run the border at once, and how long each one's tail is.
-/// Long tails rather than dots: at this resolution a single bright sub-pixel
-/// travelling a perimeter is a flicker, and a comet is a light.
-const BULBS: usize = 4;
-const BULB_TAIL: i32 = 16;
-
-/// The sub-pixel `t` steps clockwise round a rectangle's perimeter from its
-/// top-left corner.
-fn perimeter(rect: (i32, i32, i32, i32), t: i32) -> (i32, i32) {
-    let (x0, y0, x1, y1) = rect;
-    let (w, h) = (x1 - x0, y1 - y0);
-    let per = 2 * (w + h);
-    let t = t.rem_euclid(per.max(1));
-    if t < w {
-        (x0 + t, y0)
-    } else if t < w + h {
-        (x1, y0 + (t - w))
-    } else if t < 2 * w + h {
-        (x1 - (t - w - h), y1)
-    } else {
-        (x0, y1 - (t - 2 * w - h))
-    }
-}
-
-fn bulbs(b: &mut Buf, rect: (i32, i32, i32, i32), hue: Rgb, phase: f32) {
-    let (x0, y0, x1, y1) = rect;
-    let per = 2 * ((x1 - x0) + (y1 - y0));
-    if per <= 0 {
-        return;
-    }
-    let head = (phase.rem_euclid(1.0) * per as f32) as i32;
-    for i in 0..BULBS {
-        let start = head + (per * i as i32) / BULBS as i32;
-        for k in 0..BULB_TAIL {
-            // Bright at the head and gone at the tail, so each light reads as
-            // travelling rather than as four dots blinking in sequence.
-            let fade = 1.0 - k as f32 / BULB_TAIL as f32;
-            let (x, y) = perimeter(rect, start - k);
-            let lit_col = hue.lerp(c(WHITE), fade * fade);
-            lit(b, x, y, lit_col, lit_col.mul(fade * fade * 1.5));
+        let is_light = i == 0 || i == 3;
+        let base = if is_light { bevel_light } else { bevel_dark };
+        let hot = matches!(edges[i], Edge::Kill | Edge::Lava);
+        let col = if hot { hot_col } else { base.lerp(hot_col, ignite) };
+        let glow = if hot { hot_col.mul(0.25 + ignite) } else { Rgb::ZERO };
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                // The dash rhythm is in sub-pixels, not cells, so the gaps
+                // stay the same size at every terminal size. Static: nothing
+                // on the boundary of a live field is allowed to move.
+                if edges[i] == Edge::Lava && (x - ax0).rem_euclid(7) >= 4 {
+                    continue;
+                }
+                lit(b, x, y, col, glow);
+            }
         }
     }
 }
@@ -144,9 +105,10 @@ fn bulbs(b: &mut Buf, rect: (i32, i32, i32, i32), hue: Rgb, phase: f32) {
 /// How the empty cells of an arena are ruled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rule {
-    /// A pip at every cell's top-left. Reads as a lattice, which is what a game
-    /// that moves in both axes wants.
-    Lattice,
+    /// Alternate cells a shade apart — a tiled floor. Gives a game that moves
+    /// in both axes its spatial reference everywhere, without the grid-paper
+    /// pips the old lattice scattered over the field.
+    Check,
     /// Nothing at all. A falling game does not need help seeing its columns,
     /// and an empty well should be empty.
     None,
@@ -166,20 +128,20 @@ pub fn floor(b: &mut Buf, l: &Layout, shake: i32, rule: Rule, filled: &dyn Fn(i3
     if rule == Rule::None {
         return;
     }
-    // Bright enough to clear the posterize floor — at the old IRON level the
-    // whole lattice rounded to black and the field read as void.
-    let tick = c(IRON).mul(2.6);
-    // On a small frame a cell is three sub-pixels and a pip at every cell is
-    // a third of the field lit: thin to a checkerboard before the furniture
-    // outshines the game.
-    let sparse = l.mino_px < 5;
+    // The floor: alternate cells lifted one visible shade. Filled cells are
+    // skipped — the tile is under the game, never through it.
+    let tile = c(IRON).mul(1.35);
     for mr in 0..l.rows as i32 {
         for mc in 0..l.cols as i32 {
-            if filled(mc, mr) || (sparse && (mc + mr) % 2 == 1) {
+            if filled(mc, mr) || (mc + mr) % 2 == 1 {
                 continue;
             }
             let (cx, cy) = l.cell_origin(mc, mr, shake);
-            put_base(b, cx, cy, tick);
+            for dy in 0..l.mino_px as i32 {
+                for dx in 0..l.mino_px as i32 {
+                    put_base(b, cx + dx, cy + dy, tile);
+                }
+            }
         }
     }
 }
