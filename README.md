@@ -63,9 +63,11 @@ Behind everything flies the warp field — streaks pouring out of a point
 behind the arena, drifting at rest, stretching as you heat up, punching into
 hyperspace when something lands. It is drawn as light, so it never covers a
 thing you need to read. The idle screens get the rest of the spectacle: a
-lamp chase stepping around the marquee, and a real slot reel — names on a
-strip behind a lit window with detent marks, overshooting its stop and
-rocking back when it lands.
+lamp chase stepping around the marquee, a neon sun rising banded behind the
+wordmark — under a wrapped command its height is the progress gauge, so the
+build literally raises the sun — and a real slot reel: names on a strip
+behind a lit window, clicking past detent by detent as the drive decays,
+overshooting the stop and rocking back when the pawl catches.
 
 And it has a soundtrack: a hand-rolled chip synth — square waves, noise and
 an E-minor loop that is deliberately a little dirty — piped raw into

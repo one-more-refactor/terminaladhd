@@ -441,6 +441,17 @@ impl Stage {
         let l_w = self.layout.w as f32;
         let cx = self.layout.w as i32 / 2;
         let mid = self.layout.h as f32;
+
+        // The poster's backdrop: the neon sun on the horizon, behind the
+        // wordmark. It earned its way back by reacting — it rises with the
+        // idle time, its slits breathe with the demo's heat, and under a
+        // wrapped command its height IS the progress gauge: the build
+        // literally raises the sun.
+        let rise = self
+            .progress
+            .unwrap_or((t / 45.0).clamp(0.0, 0.9))
+            .clamp(0.0, 1.0);
+        self.sunrise(cx, mid as i32 + 2, rise, demo.heat(), t);
         let scale = hero_scale(TITLE, self.layout.w, 4);
         text_center(
             &mut self.buf,
@@ -456,14 +467,21 @@ impl Stage {
         let breathe = (t * 1.9).sin() * 1.5;
         chrome_word(&mut self.buf, TITLE, scale, l_w * 0.5, mid - 10.0 + breathe);
 
-        // The one blinking thing on the screen, at the rate every cabinet used.
+        // The one blinking thing on the screen, at the rate every cabinet
+        // used. It measures itself: on a frame too narrow for the full-size
+        // plate it drops a size instead of running off the glass.
         if (t * 1.6) as i32 % 2 == 0 {
+            let coin_scale = if text_w("INSERT COIN", 2) < self.buf.w as i32 - 4 {
+                2
+            } else {
+                1
+            };
             text_center(
                 &mut self.buf,
                 "INSERT COIN",
                 cx,
                 mid as i32 + 8,
-                2,
+                coin_scale,
                 c(YELLOW),
                 1.2,
             );
@@ -963,6 +981,41 @@ impl Stage {
     // ------------------------------------------------------------- plumbing
 
     /// Black ground and the warp behind everything.
+    /// The neon sun: a banded disc rising behind the marquee, cut off at
+    /// the horizon row. The slits live in horizon space — thick near the
+    /// ground, gone at the crown, drifting with the heat — and the colour
+    /// runs gold at the crown into magenta at the ground, hard-edged,
+    /// because every band on this machine is.
+    fn sunrise(&mut self, cx: i32, horizon: i32, rise: f32, heat: f32, t: f32) {
+        let sh = self.buf.sh as f32;
+        let r = (sh * 0.40).min(self.buf.w as f32 * 0.24);
+        // From a sliver kissing the horizon to a dome standing on it.
+        let cy = horizon as f32 + r * (0.8 - 1.35 * rise);
+        let gold = c(YELLOW);
+        let hot = c(MAGENTA);
+        let drift = t * (1.5 + 5.0 * heat.clamp(0.0, 1.0));
+        let top = (cy - r).max(0.0) as i32;
+        for y in top..horizon.min(self.buf.sh as i32) {
+            let dy = y as f32 - cy;
+            if dy.abs() >= r {
+                continue;
+            }
+            // The slits: anchored to the sky, not the disc, so the sun
+            // rises through them. Wider and closer near the ground.
+            let above = (horizon - y) as f32;
+            let thick = (3.0 - above / 8.0).max(0.0);
+            if thick > 0.0 && (above + drift).rem_euclid(7.0) < thick {
+                continue;
+            }
+            let half = (r * r - dy * dy).sqrt() as i32;
+            let g = ((dy + r) / (2.0 * r)).clamp(0.0, 1.0).powf(0.55);
+            let col = gold.lerp(hot, g);
+            for x in cx - half..=cx + half {
+                lit(&mut self.buf, x, y, col, col.mul(0.18));
+            }
+        }
+    }
+
     /// Discrete bulbs chasing the frame edge, three lit then one dark,
     /// stepping four times a second.
     fn lamps(&mut self, t: f32) {

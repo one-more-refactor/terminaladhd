@@ -312,6 +312,17 @@ There is no pool and no fixed buffer. The cap is a count and the oldest go
 first, which is both simpler than a pool and the behaviour you want: the sparks
 that matter are the ones that just left.
 
+## The sun came back
+
+The neon sun was cut in the cabinet pivot for being scenery, and returned
+under the law that killed it: it reacts. It rises with the attract loop's
+idle time, its horizon slits drift faster with the demo's heat, and under a
+wrapped command its height IS the progress readout — the build literally
+raises the sun. It is drawn in the machine's one shading language: hard
+gap-bands anchored to the sky, gold at the crown into magenta at the
+ground, cut dead at the horizon row. Attract and nowhere else — the poster
+does not follow you into play.
+
 ## Nothing on screen sits still
 
 The screen is deliberately sparse, and the price of sparse is that whatever is
