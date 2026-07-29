@@ -92,6 +92,12 @@ pub struct Stage {
     rip: (f32, f32),
     /// How hard the wheel has just landed, `0.0..=1.0`, decaying.
     pub slam: f32,
+    /// Where the reel strip was last frame, in slots, and how much of the
+    /// last detent click is still lighting the pips. The clicks are what
+    /// make it a slot machine: state lives here because the painter is
+    /// called once per frame and a click is the difference between frames.
+    reel_pos: f32,
+    reel_click: f32,
     /// The last score drawn, and how much the strip is still lifting from the
     /// change — the score is what the machine is about, and a number that never
     /// reacts is one nobody watches.
@@ -349,6 +355,8 @@ impl Stage {
             fired_hue: c(WHITE),
             rip: (0.0, 0.0),
             slam: 0.0,
+            reel_pos: 0.0,
+            reel_click: 0.0,
             shown_score: 0,
             score_hot: 0.0,
             hum: 0.0,
@@ -554,17 +562,54 @@ impl Stage {
         let (ix0, ix1) = (wx0 + 2, wx0 + win_w - 3);
         let (iy0, iy1) = (wy0 + 2, wy0 + win_h - 3);
 
-        // Strip position in slots, with the landing bounce: past the detent
-        // and back, spent as the slam decays.
+        // Strip position in slots. The raw travel is the drive; what makes
+        // it a slot machine is the detent magnetism on top: as the reel
+        // slows, positions stiffen toward whole slots, so the last names
+        // CLICK past one at a time instead of gliding. The landing bounce —
+        // past the detent and back as the slam decays — is the pawl.
         let bounce = self.slam * self.slam * 0.22;
-        let pos = travel * (reel.len() - 1) as f32 + if travel >= 1.0 { bounce } else { 0.0 };
+        let raw = travel * (reel.len() - 1) as f32;
+        let snap = ((travel - 0.55) / 0.42).clamp(0.0, 1.0);
+        let pos = raw
+            + (raw.round() - raw) * snap * snap * 0.85
+            + if travel >= 1.0 { bounce } else { 0.0 };
+
+        // A new spin rewinds the strip; a click is the notch changing on the
+        // way to the stop. The click nudges the strip a sub-row deeper for
+        // one frame — the tooth of the pawl dragging — and relights the
+        // detent pips.
+        if pos < self.reel_pos - 0.5 {
+            self.reel_pos = pos;
+        }
+        let clicked = travel < 1.0 && (pos + 0.5).floor() > (self.reel_pos + 0.5).floor();
+        let speed = (pos - self.reel_pos).max(0.0) * pitch as f32;
+        self.reel_pos = pos;
+        if clicked {
+            self.reel_click = 1.0;
+            self.warp.punch(0.08);
+        }
+        self.reel_click = (self.reel_click - 0.2).max(0.0);
+        let tooth = if self.reel_click > 0.7 { 1 } else { 0 };
 
         for (i, k) in reel.iter().enumerate() {
-            let dy = ((i as f32 - pos) * pitch as f32) as i32;
+            let dy = ((i as f32 - pos) * pitch as f32) as i32 + tooth;
             if dy.abs() > win_h {
                 continue;
             }
             let cy = mid_y + dy;
+            // At speed the reel is a double exposure: the same name again a
+            // step behind itself, under the real one. Photographed motion is
+            // what a spinning drum looks like through glass.
+            if speed > 5.0 {
+                let ghost = (speed * 0.6).min(pitch as f32 * 0.4) as i32;
+                chrome_word(
+                    &mut self.buf,
+                    k.name(),
+                    scale,
+                    l_w * 0.5,
+                    (cy - ghost) as f32,
+                );
+            }
             chrome_word(&mut self.buf, k.name(), scale, l_w * 0.5, cy as f32);
             // On the frames right after it stops, the winner is drawn again
             // a step off itself — two frames of double image is what a thing
@@ -618,16 +663,18 @@ impl Stage {
                 put_base(&mut self.buf, x1, y, rail);
             }
         }
-        let hot = c(MAGENTA);
+        let hot = c(MAGENTA).lerp(c(WHITE), self.reel_click * 0.7);
+        let glow = 0.5 + 1.2 * self.reel_click;
+        let reach = 3 + if self.reel_click > 0.5 { 1 } else { 0 };
         for dy in -1..=1i32 {
-            for ox in 0..3 {
-                lit(&mut self.buf, wx0 - 1 - ox, mid_y + dy, hot, hot.mul(0.5));
+            for ox in 0..reach {
+                lit(&mut self.buf, wx0 - 1 - ox, mid_y + dy, hot, hot.mul(glow));
                 lit(
                     &mut self.buf,
                     wx0 + win_w + ox,
                     mid_y + dy,
                     hot,
-                    hot.mul(0.5),
+                    hot.mul(glow),
                 );
             }
         }

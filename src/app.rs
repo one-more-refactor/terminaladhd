@@ -41,7 +41,7 @@ const COIN_TIME: f32 = 0.40;
 
 /// How long the wheel turns, how long the winner is held after it stops, and
 /// how many slots it travels.
-const SPIN_TIME: Duration = Duration::from_millis(800);
+const SPIN_TIME: Duration = Duration::from_millis(950);
 const SPIN_HOLD: f32 = 0.25;
 const SPIN_SLOTS: usize = 9;
 
@@ -535,10 +535,10 @@ pub fn run(host: &mut dyn Host, w0: usize, h0: usize, quality: Quality) -> Resul
             Mode::Spin { reel, age } => {
                 record_live = false;
                 let t = (age / SPIN_TIME.as_secs_f32()).clamp(0.0, 1.0);
-                // Ease out to the fifth: nearly all the travel is spent in the
-                // first third and the last few slots crawl past, which is the
-                // whole difference between a wheel and a fade.
-                let travel = 1.0 - (1.0 - t).powi(5);
+                // A slot machine's drive: launched flat out, then a long
+                // fourth-power decel so the last few names arrive one click
+                // at a time. The clicking itself lives in the painter.
+                let travel = 1.0 - (1.0 - t).powi(4);
                 stage.slam = (stage.slam - 0.12).max(0.0);
                 stage.spin(reel, travel, &tick);
             }

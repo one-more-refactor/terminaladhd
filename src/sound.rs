@@ -138,6 +138,10 @@ pub struct Synth {
     snare_left: i32,
     hat_left: i32,
     hat_gain: f32,
+    /// Pawl clicks for the wheel, as sample countdowns — scheduled on the
+    /// same fourth-power decel the strip follows, so the ear and the eye
+    /// agree about where the reel is.
+    ratchet: Vec<i32>,
     /// Noise sweep for the spin riser and the death crash.
     sweep_left: i32,
     sweep_len: i32,
@@ -180,6 +184,7 @@ impl Synth {
             snare_left: 0,
             hat_left: 0,
             hat_gain: 0.0,
+            ratchet: Vec::new(),
             sweep_left: 0,
             sweep_len: 1,
             sweep_up: false,
@@ -192,10 +197,20 @@ impl Synth {
 
     pub fn mood(&mut self, mood: Mood) {
         if self.mood.scene != mood.scene && mood.scene == Scene::Spin {
-            // The riser: a climbing noise sweep under a snare roll.
+            // The riser: a climbing noise sweep, and the pawl clicking past
+            // each name. The strip's position is 1-(1-t)^4, so a notch lands
+            // where that curve crosses each whole slot — the inverse curve,
+            // sampled per notch.
             self.sweep_len = (RATE as f32 * 0.8) as i32;
             self.sweep_left = self.sweep_len;
             self.sweep_up = true;
+            self.ratchet.clear();
+            let spin = 0.95 * RATE as f32;
+            let slots = 8.0;
+            for i in 1..=8 {
+                let t = 1.0 - (1.0 - i as f32 / slots).powf(0.25);
+                self.ratchet.push((t * spin) as i32);
+            }
         }
         self.mood = mood;
     }
@@ -278,10 +293,8 @@ impl Synth {
         let playing = matches!(self.mood.scene, Scene::Attract | Scene::Play);
 
         if matches!(self.mood.scene, Scene::Spin) {
-            // The riser owns the wheel: snare roll, swelling.
-            let g = 0.10 + 0.25 * (in_bar as f32 / 16.0);
-            self.snare_left = (RATE / 22) as i32;
-            self.hat_gain = g;
+            // The wheel's rhythm is the ratchet, scheduled when the spin
+            // began; the step clock stays out of its way.
             return;
         }
         if !playing && !matches!(self.mood.scene, Scene::Over) {
@@ -406,6 +419,21 @@ impl Synth {
             if self.hat_left > 0 {
                 self.hat_left -= 1;
                 mix += self.white() * self.hat_gain * (self.hat_left as f32 / (RATE / 40) as f32);
+            }
+            // The pawl: each scheduled click lands as a bright tick and a
+            // short thock — the tooth catching the next notch.
+            let mut fired = false;
+            self.ratchet.retain_mut(|left| {
+                *left -= 1;
+                if *left <= 0 {
+                    fired = true;
+                }
+                *left > 0
+            });
+            if fired {
+                self.hat_left = (RATE / 60) as i32;
+                self.hat_gain = 0.30;
+                self.kick_left = (RATE / 30) as i32;
             }
             if self.sweep_left > 0 {
                 self.sweep_left -= 1;

@@ -182,6 +182,18 @@ fn body(b: &mut Buf, l: &Layout, g: &Snake, shake: i32) {
         } else {
             0.30 * (1.0 - t) + 0.5 * wave
         };
+        // The eating, seen from outside: the segment sitting on a swallowed
+        // apple's cell bulges a step fatter and brighter, and the head gulps
+        // — swells for the first beat after the bite. Neither changes shape,
+        // only size: the machine's rule about pulsing, kept.
+        let cell = (fc.round() as i32, fr.round() as i32);
+        let lump = death == 0.0 && g.lumps().contains(&cell);
+        let gulp = i == 0 && death == 0.0 && g.since_eat() < 0.12;
+        let (x, y, p, col) = if lump || gulp {
+            (x - 1, y - 1, p + 2, col.lerp(c(WHITE), 0.18))
+        } else {
+            (x, y, p, col)
+        };
         pill(b, x, y, p, col, if igniting { 1.5 } else { halo });
         if i == 0 && !igniting {
             eyes(b, x, y, p, g.dir());

@@ -166,6 +166,11 @@ pub struct Snake {
     /// Debris. An apple bursts when it is taken and the body comes apart when
     /// the run ends.
     pub(crate) sparks: Sparks,
+    /// Cells where a swallowed apple still sits inside the body. The lump
+    /// stays at the cell it was eaten on while the body slides over it —
+    /// which is exactly what swallowing looks like from outside: a bulge
+    /// travelling head to tail without moving an inch itself.
+    lumps: Vec<(i32, i32)>,
     /// Frames of inverted playfield left from the last apple.
     flash: u32,
     over: bool,
@@ -216,6 +221,7 @@ impl Snake {
             hitstop: 0,
             kick: None,
             sparks: Sparks::new(),
+            lumps: Vec::new(),
             flash: 0,
             over: false,
             death: 0.0,
@@ -340,6 +346,11 @@ impl Snake {
         self.death
     }
 
+    /// Cells where a swallowed apple is still travelling down the body.
+    pub fn lumps(&self) -> &[(i32, i32)] {
+        &self.lumps
+    }
+
     /// Whether the field is still lit from the last apple.
     pub fn flashing(&self) -> bool {
         self.flash > 0
@@ -410,6 +421,11 @@ impl Snake {
         } else {
             self.body.pop_back();
         }
+        // A lump the tail has slid past has been digested.
+        if !self.lumps.is_empty() {
+            let body = &self.body;
+            self.lumps.retain(|c| body.contains(c));
+        }
 
         if next == self.apple.at {
             self.eat();
@@ -471,6 +487,8 @@ impl Snake {
         } else if self.mult >= 3 {
             self.shout = Some((format!("{}X STREAK", self.mult), 1.0));
         }
+
+        self.lumps.push(self.apple.at);
 
         // The next apple is golden on the count, not on a die roll: a reward
         // you can see coming is one you will change your line to reach.
