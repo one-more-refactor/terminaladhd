@@ -968,7 +968,6 @@ impl Stage {
         }
     }
 
-
     /// Strip, rule, ticker, post, resolve — the same tail on every screen, so
     /// the chrome never flickers between two of them.
     /// The one row of chrome, then post and resolve. Every screen ends here.

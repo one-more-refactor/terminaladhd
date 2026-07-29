@@ -1096,12 +1096,7 @@ fn carve(rng: &mut Rng, cols: i32, rows: i32, home: (i32, i32), spawn: (i32, i32
     // Four pellets, one per quarter, as deep into the corners as the maze
     // allows. Their placement is the level's shape: every hunt starts from
     // one of these four rooms.
-    for (cx, cy) in [
-        (1, 1),
-        (cols - 2, 1),
-        (1, rows - 2),
-        (cols - 2, rows - 2),
-    ] {
+    for (cx, cy) in [(1, 1), (cols - 2, 1), (1, rows - 2), (cols - 2, rows - 2)] {
         let mut best = None;
         let mut best_d = i32::MAX;
         for y in 1..rows - 1 {

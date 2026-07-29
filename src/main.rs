@@ -97,7 +97,12 @@ fn parse(argv: Vec<String>) -> Result<Args> {
             "--rich" => out.lean = Some(false),
             "-h" | "--help" => out.help = true,
             "-V" | "--version" => {
-                println!("adhd {}", env!("CARGO_PKG_VERSION"));
+                let build = env!("ADHD_BUILD");
+                if build.is_empty() {
+                    println!("adhd {}", env!("CARGO_PKG_VERSION"));
+                } else {
+                    println!("adhd {} ({build})", env!("CARGO_PKG_VERSION"));
+                }
                 std::process::exit(0);
             }
             other => bail!("unknown argument {other:?} (try --help)"),

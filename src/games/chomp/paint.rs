@@ -45,14 +45,7 @@ pub fn paint(b: &mut Buf, l: &Layout, g: &Chomp) {
     } else {
         0.0
     };
-    frame(
-        b,
-        l,
-        shake,
-        Kind::Chomp.hue(),
-        ignite,
-        [Edge::Wall; 4],
-    );
+    frame(b, l, shake, Kind::Chomp.hue(), ignite, [Edge::Wall; 4]);
 
     // The maze. The outer ring is the frame's job; the tunnel mouths punch
     // visibly through it so the wrap reads as a doorway, not a glitch.
@@ -271,9 +264,8 @@ fn ghost(b: &mut Buf, l: &Layout, g: &Chomp, gh: &Ghost, shake: i32, p: i32, t: 
     let (edx, edy) = gh.dir.delta();
     if !gh.eyes {
         let frightened = gh.fright > 0.0;
-        let blink = frightened
-            && gh.fright < FRIGHT_BLINK
-            && ((gh.fright * 6.0) as u32).is_multiple_of(2);
+        let blink =
+            frightened && gh.fright < FRIGHT_BLINK && ((gh.fright * 6.0) as u32).is_multiple_of(2);
         let body = if blink {
             c(WHITE)
         } else if frightened {

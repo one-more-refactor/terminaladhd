@@ -86,8 +86,16 @@ pub fn frame(b: &mut Buf, l: &Layout, shake: i32, hue: Rgb, ignite: f32, edges: 
         let is_light = i == 0 || i == 3;
         let base = if is_light { bevel_light } else { bevel_dark };
         let hot = matches!(edges[i], Edge::Kill | Edge::Lava);
-        let col = if hot { hot_col } else { base.lerp(hot_col, ignite) };
-        let glow = if hot { hot_col.mul(0.25 + ignite) } else { Rgb::ZERO };
+        let col = if hot {
+            hot_col
+        } else {
+            base.lerp(hot_col, ignite)
+        };
+        let glow = if hot {
+            hot_col.mul(0.25 + ignite)
+        } else {
+            Rgb::ZERO
+        };
         for y in y0..=y1 {
             for x in x0..=x1 {
                 // The dash rhythm is in sub-pixels, not cells, so the gaps
