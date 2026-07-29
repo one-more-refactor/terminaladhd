@@ -34,8 +34,8 @@ pub fn ground(b: &mut Buf) {
 /// What one side of the arena does to the thing that touches it. The edge is
 /// drawn from this, so the boundary *says what it does* — and each game gets
 /// its own silhouette from nothing but the truth: snake is a sealed ring,
-/// the tetris well is an open-topped pocket, breakout is a roofed court over
-/// a floor that is not there.
+/// the tetris well is an open-topped pocket, and a court with no floor is
+/// drawn as exactly that.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Edge {
     /// Ends the run. Two sub-pixels of the game's own hue — not a warning
@@ -44,7 +44,7 @@ pub enum Edge {
     Kill,
     /// Furniture: bounced off or rested against. The quiet bevel.
     Wall,
-    /// Ends the run, but nothing is there — breakout's open floor. The same
+    /// Ends the run, but nothing is there — an open floor. The same
     /// hot hue as [`Edge::Kill`], dashed, because a wall you can fall through
     /// must not be drawn as a wall.
     Lava,

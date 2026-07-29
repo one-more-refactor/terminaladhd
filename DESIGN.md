@@ -191,10 +191,10 @@ what it does without ever reaching for red.
 
 So snake, where every wall kills, is ringed in its own cool white; the
 tetris well, where no wall kills anything, is a quiet pocket left open at
-the top for the pieces to fall into; and breakout wears the bevel on the
-three sides the ball plays off while the open floor — the only edge that
-takes a ball — is dashed hot violet, because a wall you can fall through
-must not be drawn as a wall. The corners took care
+the top for the pieces to fall into; and chomp's boundary is all quiet too,
+because in a maze it is the pack that kills, not the walls — the maze draws
+its own walls as lit outlines, and the tunnel mouths cut straight through
+the frame so the wrap has a visible door at both ends. The corners took care
 of themselves: bands overlapping at the ends of a rectangle is what a butt
 joint looks like, and a butt joint is what a cabinet has.
 
@@ -202,8 +202,8 @@ The fields got floors at the same time. Snake's lattice of pips read as grid
 paper; it is a checkerboard now, alternate cells lifted to the darkest navy
 the posterize ladder can hold, which reads as tile the way every pit floor
 in the arcade did. The tetris well stays empty — a falling game needs no
-help seeing its columns — and breakout's court stays black because a ball
-at speed is the one thing on the machine that must never share its ground.
+help seeing its columns — and chomp needs no floor at all, because the maze
+is its own furniture and a dot field over tile would be noise on noise.
 
 Nothing on it is brighter than the game inside it, either. A frame that
 outshines the playfield is a picture frame, and the only time it is allowed to
@@ -237,8 +237,9 @@ the same distance reads as an animal, and it is the same game underneath.
 
 The first two games are tuned against `blipscreen`'s, which is the version
 that felt right, and the numbers were diffed rather than guessed. Where they
-differ now it is deliberate. Breakout is tuned against 1976, which had no bugs
-to diff.
+differ now it is deliberate. Chomp is tuned against the arcade originals:
+the player a touch faster than the pack, the hunt shrinking with the levels
+but never below usable, the scatter never below a breath.
 
 **Snake.** The speed curve is the reference's exactly: six tiers three apples
 apart, 150 ms a cell down to 75 ms, reached around the fifteenth apple. What had
@@ -533,9 +534,9 @@ job; the question was only ever how much of the frame it decides has changed.
 
 ## Things that were deliberately not done
 
-- ~~**A third game.**~~ This held until BREAKOUT earned its slot — see "The
-  third game" below; the bar it had to clear was being done properly, not
-  merely existing.
+- ~~**A third game.**~~ This held until the third slot earned its keep — see
+  "The third game" below; the bar was being done properly, not merely
+  existing. BREAKOUT held the slot first and CHOMP holds it now.
 - **Configurable keybindings.** A TOML file is a decision, and see the premise.
 - **A menu, difficulty select, or game modes.** Same reason.
 - **Screen curvature.** It is the one CRT artefact that would have to resample
@@ -550,17 +551,32 @@ job; the question was only ever how much of the frame it decides has changed.
 
 ## The third game
 
-BREAKOUT went on the wheel in one evening, which was the test of the seam: a
-`Kind` variant, a module with the logic, a painter, and nothing else moved.
-Its rules are the 1976 originals because they are load-bearing — the ball
-speeds up on a hit count and again at the deep rows, the paddle shrinks the
-first time the ball touches the ceiling, and the bounce angle comes from where
-the ball lands on the face, which makes the paddle the only aim mechanism in
-the game. Its demo tracks the ball only on the way down, plays deliberately
-off the paddle's shoulder, and has slow hands: competent enough to rally,
-mortal enough that the attract loop always moves on. The balance tests assert
-the paddle can reach the far wall before the fastest legal ball can, because
-an unreachable ball is a coin toss rather than a game.
+The slot has been held twice, which is the real test of the seam: BREAKOUT
+went on the wheel in one evening, and when it was retired, CHOMP replaced it
+the same way — a `Kind` variant, a module with the logic, a painter, and
+nothing else moved.
+
+CHOMP is a maze chase with the classic bones and one modern organ: the maze
+is *carved*, fresh, for every level and every arena size. The carver works on
+an odd lattice — a spanning tree first, then a share of the walls between
+corridors knocked through so there are loops, because being able to run a
+circle around a ghost is the entire skill of the game. The left half is
+mirrored onto the right the way the real cabinets were, so a glance at a new
+level is enough to start running; a tunnel pierces both walls and wraps. A
+flood fill then seals anything the carver orphaned and knocks doors until
+the maze is one piece — a dot that cannot be eaten is a level that cannot be
+finished, so reachability is asserted in tests across twenty seeds.
+
+The ghosts are the classic pack: a hunter on your cell, an ambusher four
+ahead of your nose, a flank that mirrors you through the hunter, a coward
+that hunts from range and breaks off up close. They breathe between scatter
+and chase, reversing on every mode change so the tide is legible without a
+HUD, and leave home staggered on a clock so a level opens as a mounting
+problem. A pellet reverses and blues the pack; each ghost taken in one hunt
+pays double the one before, and the eyes fly home to be reborn. Its demo is
+a breadth-first search that gives live ghosts a wide berth and turns hunter
+the moment the pack is blue — competent enough to clear a board, mortal
+enough that the attract loop always moves on.
 
 ## Adding a game
 

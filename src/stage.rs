@@ -539,7 +539,7 @@ impl Stage {
         // moving under its own weight.
         let l_w = self.layout.w as f32;
         let mid_y = self.layout.h as i32; // sub-row centre of the frame
-        let scale = hero_scale("BREAKOUT", self.layout.w, 2);
+        let scale = hero_scale("BLOCKS", self.layout.w, 2);
         let name_h = (7 * scale) as i32;
         let pitch = name_h + name_h / 2 + 4;
         let widest = reel

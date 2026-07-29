@@ -309,8 +309,9 @@ fn play(
 
     let mut game = kind.spawn(Rng::from_seed(7), w, h);
     for i in 0..steps {
+        // The demo is mortal by design; the portrait must not be of a corpse.
         if game.is_over() {
-            break;
+            game = kind.spawn(Rng::from_seed(7 + i as u64), w, h);
         }
         let input = game.autopilot();
         game.step(&input, Duration::from_millis(16));

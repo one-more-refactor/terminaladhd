@@ -224,7 +224,7 @@ pub fn brick(b: &mut Buf, x0: i32, y0: i32, size: i32, fill: Rgb, halo: f32) {
 }
 
 /// [`brick`]'s rectangular sibling: the same light border with knocked
-/// corners, body shadow and top-left gleam, on a `w × h` slab — a breakout
+/// corners, body shadow and top-left gleam, on a `w × h` slab — a wide
 /// brick is twice as wide as it is tall, and a paddle is wider still.
 pub fn slab(b: &mut Buf, x0: i32, y0: i32, w: i32, h: i32, fill: Rgb, halo: f32) {
     if w < 4 || h < 4 {
