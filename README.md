@@ -1,6 +1,13 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/brand/mark-dark.svg">
+  <img src=".github/brand/mark-light.svg" alt="" width="32" height="32">
+</picture>
+
 # terminaladhd
 
 An arcade for the dead time.
+
+<img src=".github/brand/kind-lab.svg" alt="kind: lab" height="20">&nbsp;<img src=".github/brand/status-live.svg" alt="status: live" height="20">
 
 ![the machine running](assets/demo.gif)
 
@@ -172,3 +179,12 @@ It needs 60×24, so a terminal app in landscape is comfortable and portrait
 works if the font is small enough. Add `-C` to your `ssh` command and the ANSI
 compresses well on top of all this.
 
+---
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/brand/lockup-dark.svg">
+  <img src=".github/brand/lockup-light.svg" alt="one more" height="20">
+</picture>
+
+part of [one more](https://github.com/one-more-refactor) — small tools that
+keep their data in plain files and never ask you to make an account.
