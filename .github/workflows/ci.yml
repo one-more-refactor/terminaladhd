@@ -5,6 +5,16 @@ on:
     branches: [master]
   pull_request:
 
+# A newer push to the same branch makes the older run's answer moot.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # The tests must never reach for a speaker on a runner.
+  ADHD_MUTE: "1"
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -13,8 +23,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      # --all-targets so the tests and benches are linted too, not just the
+      # --all-targets so the tests and examples are linted too, not just the
       # library — that is where the drift usually hides.
       - run: cargo clippy --all-targets --locked -- -D warnings
+      # Unit tests plus tests/cli.rs, which runs the real binary with no
+      # terminal attached: flags, wrapping, exit codes and --shot frames.
       - run: cargo test --locked
