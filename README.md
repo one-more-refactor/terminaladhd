@@ -7,7 +7,7 @@
 
 An arcade for the dead time.
 
-<img src=".github/brand/kind-lab.svg" alt="kind: lab" height="20">&nbsp;<img src=".github/brand/status-live.svg" alt="status: live" height="20">
+<img src=".github/brand/kind-lab.svg" alt="kind: lab" height="20">&nbsp;<img src=".github/brand/status-done.svg" alt="status: done" height="20">
 
 ![the machine running](assets/demo.gif)
 
@@ -19,6 +19,27 @@ adhd                    play until you quit
 adhd -- cargo build     play while that runs, exit with its code
 ```
 
+## Install
+
+Prebuilt binaries for Linux (x86_64 musl, aarch64) and macOS (Intel, Apple
+silicon) are on the [Releases](https://github.com/one-more-refactor/terminaladhd/releases)
+page. Check the tarball against `SHA256SUMS` before you unpack it:
+
+```
+v=v0.2.0 t=x86_64-unknown-linux-musl
+base=https://github.com/one-more-refactor/terminaladhd/releases/download/$v
+curl -LO $base/terminaladhd-$v-$t.tar.gz -LO $base/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xzf terminaladhd-$v-$t.tar.gz    # one binary: adhd
+```
+
+(`shasum -a 256 --check --ignore-missing SHA256SUMS` on macOS.) Or build it
+with a Rust toolchain:
+
+```
+cargo install --git https://github.com/one-more-refactor/terminaladhd
+```
+
 ## Building
 
 ```
@@ -27,13 +48,13 @@ cargo build --release
 ```
 
 No system dependencies. `--size WxH` forces a size, `--bench` reports what a
-frame costs, and `--shot DIR` dumps every screen — attract, spin, both games,
+frame costs, and `--shot DIR` dumps every screen — attract, spin, all three games,
 game over, the board — as PPM, for reviewing a rendering change without a
 terminal in the way.
 
 `DESIGN.md` is the long version: why the screen is shaped this way, what a
 frame costs and where it goes, what was tried and thrown away, and what it
-would take to add a third game.
+would take to add another game.
 
 ## You do not pick the game
 
@@ -93,13 +114,13 @@ in the maze it is the pack that kills, and the tunnel mouths cut visibly
 through the frame. Snake plays on checkerboard tile; a wall lights up as you
 close on it.
 
-Both games share one feel and one grammar. An impact stops the whole machine
+All three games share one feel and one grammar. An impact stops the whole machine
 for a few frames, so a Tetris and a swallowed apple land rather than merely
 change colour. Points float up off the cell that earned them in the same face
 at the same rate. And the side columns are one shape used twice: a label, a
 hairline under it, then content — the queue and the readings on the same left
-edge and the same rhythm, in both games. Two games laid out differently read as
-two programs.
+edge and the same rhythm, in every game. Games laid out differently read as
+different programs.
 
 Everything reflows from `(width, height)` through a single layout solver, and
 the arena takes every row the chrome does not need. An 80×26 window and a
@@ -140,6 +161,13 @@ With no terminal to draw on — a CI log, a pipe, a cron job — it does not
 refuse. It runs the command, hands back its code, and gets out of the way. A
 script that works should not stop working the moment someone prefixes it with
 `adhd`.
+
+The command gets no input when stdin is a terminal: that keyboard is the
+game's. A command that prompts (`[y/N]`, `apt`, `git clean -i`) reads
+end-of-file instead of hanging invisibly behind the arcade or taking your game
+keys as its answer. Piped stdin still reaches it, so `cat list | adhd -- xargs
+…` works, and if you leave the arcade before the command is done, `adhd` says
+it is waiting for it.
 
 Escape sequences in the child's output are stripped before they reach the
 ticker — subprocess text lands inside our frame, so an unsanitized one could
