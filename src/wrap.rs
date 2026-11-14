@@ -5,10 +5,15 @@
 //! stderr is captured, because that is where progress chatter goes and where we
 //! can afford to hold it back until the world folds away.
 //!
+//! Stdin is not shared when it is a terminal: the arcade holds that keyboard
+//! in raw mode, and a prompt (`[y/N]`, `apt`, `git clean -i`) would either
+//! hang invisibly behind the world or take game keys as its answer. Such a
+//! child reads end-of-file instead. Piped stdin still flows through.
+//!
 //! Two threads: one draining stderr into the ticker, one waiting on the child.
 //! The loop asks through the [`Command`] host and never blocks on either.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::process::{self, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -42,11 +47,20 @@ const TAIL_LINES: usize = 40;
 impl Command {
     /// Spawn `argv` and return the host that reports on it.
     pub fn spawn(argv: &[String]) -> Result<Self> {
+        let stdin = if shares_stdin(std::io::stdin().is_terminal()) {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
+        Self::spawn_with(argv, stdin)
+    }
+
+    fn spawn_with(argv: &[String], stdin: Stdio) -> Result<Self> {
         let (program, rest) = argv.split_first().context("no command given")?;
 
         let mut child = process::Command::new(program)
             .args(rest)
-            .stdin(Stdio::inherit())
+            .stdin(stdin)
             .stdout(Stdio::inherit())
             .stderr(Stdio::piped())
             .spawn()
@@ -182,6 +196,13 @@ impl Host for Command {
 /// The exit code a shell would report for `status`. A signal death has no
 /// exit code; the shell's convention is 128 plus the signal number (137 for a
 /// KILL), and matching it means scripts around us see what a shell would show.
+/// Whether the child gets our stdin. A terminal is the arcade's keyboard and
+/// stays ours; anything else (a pipe, a file, `/dev/null`) is data meant for
+/// the command and goes through untouched.
+fn shares_stdin(stdin_is_terminal: bool) -> bool {
+    !stdin_is_terminal
+}
+
 fn code_of(status: process::ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
     status
@@ -252,7 +273,10 @@ pub fn sanitize(s: &str) -> String {
                 out.push(' ');
                 kept += 1;
             }
-            c if (c as u32) < 0x20 || c as u32 == 0x7f => {}
+            // C0, DEL and C1 (U+0080..U+009F: CSI, OSC, … in their 8-bit
+            // form). The tail is replayed raw onto the real terminal, and some
+            // terminals still act on a UTF-8-encoded C1.
+            c if (c as u32) < 0x20 || ('\u{7f}'..='\u{9f}').contains(&c) => {}
             c => {
                 out.push(c);
                 kept += 1;
@@ -287,6 +311,28 @@ mod tests {
         assert_eq!(sanitize("a\x07b"), "ab");
         assert_eq!(sanitize("a\tb"), "a b");
         assert_eq!(sanitize("\x1b]0;title\x07after"), "after");
+        assert_eq!(sanitize("a\u{9b}31mb\u{9d}c\u{85}d"), "a31mbcd");
+    }
+
+    #[test]
+    fn a_terminal_stdin_stays_with_the_arcade() {
+        assert!(!shares_stdin(true));
+        assert!(shares_stdin(false));
+    }
+
+    #[test]
+    fn a_child_without_our_stdin_reads_eof_not_a_hang() {
+        let cmd = Command::spawn_with(&v(&["sh", "-c", "read -r x || exit 7"]), Stdio::null())
+            .expect("sh runs");
+        let start = Instant::now();
+        while !cmd.is_done() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "child hung on stdin"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(cmd.exit_code(), 7);
     }
 
     #[test]

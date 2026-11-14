@@ -18,7 +18,7 @@ use anyhow::{bail, Result};
 use terminaladhd::app::{self, Exit, Forever};
 use terminaladhd::stage::Quality;
 use terminaladhd::term;
-use terminaladhd::wrap::{passthrough, split_argv, Command};
+use terminaladhd::wrap::{passthrough, sanitize, split_argv, Command};
 
 const USAGE: &str = "\
 usage: adhd [--size WxH] [-- <command>...]
@@ -524,12 +524,12 @@ fn run() -> Result<i32> {
     // The player leaving is not the command leaving — and neither is the
     // arcade crashing. Keep waiting, quietly, so the exit code we hand back is
     // always the command's own.
+    let label = sanitize(cmd.label());
     if exit != Some(Exit::Finished) {
         if exit.is_none() {
-            eprintln!(
-                "adhd: the arcade crashed — `{}` is unaffected, waiting for it",
-                cmd.label()
-            );
+            eprintln!("adhd: the arcade crashed — `{label}` is unaffected, waiting for it");
+        } else if !cmd.is_done() {
+            eprintln!("adhd: waiting for `{label}` — ctrl-c to abort");
         }
         while !cmd.is_done() {
             std::thread::sleep(app::STEP);
@@ -538,7 +538,7 @@ fn run() -> Result<i32> {
 
     let code = cmd.exit_code();
     if code != 0 {
-        eprintln!("adhd: `{}` exited {code}", cmd.label());
+        eprintln!("adhd: `{label}` exited {code}");
         cmd.replay_tail()?;
     }
     Ok(code)
