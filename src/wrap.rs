@@ -111,16 +111,6 @@ impl Command {
             let code = Arc::clone(&code);
             std::thread::spawn(move || {
                 let status = child.wait();
-                // A signal death has no exit code; the shell's convention is
-                // 128 plus the signal number (137 for a KILL), and matching
-                // it means scripts around us see what a shell would show.
-                let code_of = |status: std::process::ExitStatus| {
-                    use std::os::unix::process::ExitStatusExt;
-                    status
-                        .code()
-                        .or_else(|| status.signal().map(|s| 128 + s))
-                        .unwrap_or(130)
-                };
                 code.store(status.map(code_of).unwrap_or(130), Ordering::SeqCst);
                 done.store(true, Ordering::SeqCst);
             });
@@ -187,6 +177,34 @@ impl Host for Command {
     fn autostart(&self) -> bool {
         true
     }
+}
+
+/// The exit code a shell would report for `status`. A signal death has no
+/// exit code; the shell's convention is 128 plus the signal number (137 for a
+/// KILL), and matching it means scripts around us see what a shell would show.
+fn code_of(status: process::ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .or_else(|| status.signal().map(|s| 128 + s))
+        .unwrap_or(130)
+}
+
+/// Run `argv` with nothing in the way — every stream inherited, no arcade —
+/// and hand back its exit code. This is the path for when there is no screen
+/// to play on (a CI log, a pipe, a terminal too small for the world): the
+/// one promise `adhd` makes is that prefixing a command with it never costs
+/// you the command, and that includes its stderr, live and in order.
+pub fn passthrough(argv: &[String]) -> Result<i32> {
+    let (program, rest) = argv.split_first().context("no command given")?;
+    let status = process::Command::new(program)
+        .args(rest)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("could not run {program:?}"))?;
+    Ok(code_of(status))
 }
 
 /// Strip anything that could move the cursor, repaint the screen or set a

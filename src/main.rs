@@ -18,7 +18,7 @@ use anyhow::{bail, Result};
 use terminaladhd::app::{self, Exit, Forever};
 use terminaladhd::stage::Quality;
 use terminaladhd::term;
-use terminaladhd::wrap::{split_argv, Command};
+use terminaladhd::wrap::{passthrough, split_argv, Command};
 
 const USAGE: &str = "\
 usage: adhd [--size WxH] [-- <command>...]
@@ -348,7 +348,7 @@ fn play(
 /// count the diff.
 fn bench(w: usize, h: usize) -> Result<()> {
     use std::time::{Duration, Instant};
-    use terminaladhd::games::Kind;
+    use terminaladhd::games::{Kind, ALL};
     use terminaladhd::stage::{Quality, Stage, Tick};
     use terminaladhd::world::{enc_diff, Cell, DiffOpts};
 
@@ -431,7 +431,7 @@ fn bench(w: usize, h: usize) -> Result<()> {
         ("full, tol 24", Quality { tol: 24, ..full }),
         ("lean", Quality::lean()),
     ];
-    for kind in [Kind::Tetris, Kind::Snake] {
+    for kind in ALL {
         println!("\n  {}", kind.name());
         for (name, q) in variants {
             let (per, rate, cpu) = measure(kind, q);
@@ -453,14 +453,9 @@ fn bench(w: usize, h: usize) -> Result<()> {
     Ok(())
 }
 
-fn run() -> Result<i32> {
-    let args = parse(std::env::args().skip(1).collect())?;
-    if args.help {
-        println!("{USAGE}");
-        return Ok(0);
-    }
-
-    let (w, h) = args.size.unwrap_or_else(term::size);
+/// The size to draw at, refused politely if the world will not fit in it.
+fn fitted(size: Option<(usize, usize)>) -> Result<(usize, usize)> {
+    let (w, h) = size.unwrap_or_else(term::size);
     if w < term::MIN_SIZE.0 || h < term::MIN_SIZE.1 {
         bail!(
             "terminal is {w}x{h}; the world needs at least {}x{}",
@@ -468,31 +463,34 @@ fn run() -> Result<i32> {
             term::MIN_SIZE.1
         );
     }
+    Ok((w, h))
+}
+
+fn run() -> Result<i32> {
+    let args = parse(std::env::args().skip(1).collect())?;
+    if args.help {
+        println!("{USAGE}");
+        return Ok(0);
+    }
 
     if let Some(dir) = args.shot {
+        let (w, h) = fitted(args.size)?;
         return shots(&dir, w, h).map(|_| 0);
     }
 
     if args.bench {
+        let (w, h) = fitted(args.size)?;
         return bench(w, h).map(|_| 0);
     }
 
-    // Over SSH every frame is bytes on a wire, and on a phone it may be bytes
-    // on a cellular plan. Measured on a 120x34 frame: ~160 KB/s rich; lean
-    // speaks xterm-256 at 30 fps and lands near 25 KB/s. Nobody should have to know that before it is usable, so the default
-    // follows the link.
-    let quality = match args.lean {
-        Some(true) => Quality::lean(),
-        Some(false) => Quality::full(),
-        None if term::remote() => Quality::lean(),
-        None => Quality::full(),
-    };
-
     let Some(argv) = args.command else {
+        // Ask about the terminal before its size: with nothing on stderr the
+        // size is a guess, and "no terminal" is the answer that is true.
         if !term::attached() {
             bail!("no terminal on stderr; there is nothing to play on");
         }
-        return match arcade(&mut Forever, w, h, quality)? {
+        let (w, h) = fitted(args.size)?;
+        return match arcade(&mut Forever, w, h, quality(args.lean))? {
             // The panic hook has already restored the terminal and printed
             // the panic; all that is left is to not pretend it went well.
             None => Ok(1),
@@ -500,24 +498,28 @@ fn run() -> Result<i32> {
         };
     };
 
-    let mut cmd = Command::spawn(&argv)?;
-
     // No terminal — a CI log, a pipe, a cron job. Run the command and get out
-    // of the way. Refusing here would mean a script that works becomes a script
-    // that fails the moment someone prefixes it with `adhd`, and the one
-    // promise this makes is that it never costs you your command.
+    // of the way, every stream untouched. Refusing here would mean a script
+    // that works becomes a script that fails the moment someone prefixes it
+    // with `adhd`, and the one promise this makes is that it never costs you
+    // your command — or its warnings, which a captured stderr used to eat on
+    // every run that succeeded.
     if !term::attached() {
-        while !cmd.is_done() {
-            std::thread::sleep(app::STEP);
-        }
-        let code = cmd.exit_code();
-        if code != 0 {
-            cmd.replay_tail()?;
-        }
-        return Ok(code);
+        return passthrough(&argv);
     }
 
-    let exit = arcade(&mut cmd, w, h, quality)?;
+    // A terminal too small for the world is the same promise: say why there
+    // is no arcade, then run the command plainly rather than not at all.
+    let (w, h) = match fitted(args.size) {
+        Ok(size) => size,
+        Err(e) => {
+            eprintln!("adhd: {e:#} — running it plainly");
+            return passthrough(&argv);
+        }
+    };
+
+    let mut cmd = Command::spawn(&argv)?;
+    let exit = arcade(&mut cmd, w, h, quality(args.lean))?;
 
     // The player leaving is not the command leaving — and neither is the
     // arcade crashing. Keep waiting, quietly, so the exit code we hand back is
@@ -540,4 +542,17 @@ fn run() -> Result<i32> {
         cmd.replay_tail()?;
     }
     Ok(code)
+}
+
+/// Over SSH every frame is bytes on a wire, and on a phone it may be bytes on
+/// a cellular plan. Measured on a 120x34 frame: ~160 KB/s rich; lean speaks
+/// xterm-256 at 30 fps and lands near 25 KB/s. Nobody should have to know that
+/// before it is usable, so the default follows the link.
+fn quality(lean: Option<bool>) -> Quality {
+    match lean {
+        Some(true) => Quality::lean(),
+        Some(false) => Quality::full(),
+        None if term::remote() => Quality::lean(),
+        None => Quality::full(),
+    }
 }
